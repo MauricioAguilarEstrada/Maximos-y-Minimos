@@ -188,25 +188,30 @@
             }
 
             // Manejar envío de Login
-            loginForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const folio = document.getElementById('login-folio').value;
-                const folioValidado = validarFolio(folio);
+        loginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const folio = document.getElementById('login-folio').value;
+            const folioValidado = validarFolio(folio);
 
-                if (!folioValidado) {
-                    errorMsg.innerText = "Formato de folio inválido. Usa ADM-XXXX u OPR-XXXX.";
-                    errorMsg.classList.remove('d-none');
-                    return;
-                }
+            if (!folioValidado) {
+                errorMsg.innerText = "Formato de folio inválido. Usa ADM-XXXX u OPR-XXXX.";
+                errorMsg.classList.remove('d-none');
+                return;
+            }
 
-                errorMsg.classList.add('d-none');
-                
-                // Aquí determinar el rol visualmente (esto se enviará al backend)
-                const rol = folioValidado.startsWith('ADM-') ? 'Administrador' : 'Operador';
-                alert(`Conectando con PHP...\nFolio: ${folioValidado}\nRol detectado: ${rol}`);
-                
-                // window.location.href = 'dashboard.html'; // Redirigirías aquí tras validar con PHP
-            });
+            errorMsg.classList.add('d-none');
+    
+            // Determinamos el rol según el folio
+            const rol = folioValidado.startsWith('ADM-') ? 'Administrador' : 'Operador';
+
+            // GUARDAR SESIÓN (Esto es lo que el panel de administración revisará)
+            localStorage.setItem('sesion_iniciada', 'true');
+            localStorage.setItem('usuario_rol', rol);
+            localStorage.setItem('usuario_folio', folioValidado);
+
+            // REDIRECCIÓN: Salimos de la carpeta 'login' y entramos a 'panelAdminn'
+            window.location.href = '../panelAdminn/panelAdminn.html';
+        });
 
             // Manejar envío de Registro
             registroForm.addEventListener('submit', (e) => {
