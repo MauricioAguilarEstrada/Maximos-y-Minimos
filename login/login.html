@@ -1,0 +1,231 @@
+<!--<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+</head>
+<body>
+    hola este es el login
+</body>
+</html>-->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acceso al Sistema</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --azul-rey: #003366;
+            --azul-claro: #3498db; /* Azul similar al de tu imagen de referencia */
+            --gris-input: #f2f4f6;
+        }
+
+        body, html {
+            height: 100%;
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* Fondo con imagen y overlay Azul Rey */
+        .bg-image {
+            background-image: url('https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?q=80&w=2070&auto=format&fit=crop');
+            background-size: cover;
+            background-position: center;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .bg-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 51, 102, 0.75); /* Capa Azul Rey transparente */
+            z-index: 1;
+        }
+
+        /* Estilos de la tarjeta de Login */
+        .login-card {
+            background: white;
+            padding: 40px;
+            border-radius: 4px; /* Bordes ligeramente cuadrados como en tu imagen */
+            box-shadow: 0 15px 30px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 400px;
+            z-index: 2; /* Por encima del overlay */
+            text-align: center;
+        }
+
+        .login-title {
+            color: #666;
+            font-weight: bold;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+
+        .form-control {
+            background-color: var(--gris-input);
+            border: none;
+            border-radius: 2px;
+            padding: 12px 15px;
+            margin-bottom: 15px;
+            text-align: center;
+            color: #555;
+        }
+
+        .form-control:focus {
+            background-color: #e8eaed;
+            box-shadow: none;
+            border: 1px solid var(--azul-claro);
+        }
+
+        .btn-login {
+            background-color: var(--azul-claro);
+            color: white;
+            border: none;
+            border-radius: 2px;
+            padding: 12px;
+            width: 100%;
+            font-weight: bold;
+            letter-spacing: 1px;
+            transition: background-color 0.3s;
+        }
+
+        .btn-login:hover {
+            background-color: #2980b9;
+        }
+
+        .toggle-link {
+            color: var(--azul-rey);
+            text-decoration: none;
+            font-size: 14px;
+            cursor: pointer;
+            margin-top: 15px;
+            display: inline-block;
+        }
+
+        .toggle-link:hover {
+            text-decoration: underline;
+        }
+
+        /* Ocultar formulario de registro por defecto */
+        #registro-form {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="bg-image">
+        <div class="bg-overlay"></div>
+        
+        <div class="login-card">
+            <h2 class="login-title" id="form-title">Login</h2>
+            
+            <div id="error-msg" class="alert alert-danger d-none" style="font-size: 14px; padding: 8px;"></div>
+
+            <form id="login-form">
+                <input type="text" id="login-folio" class="form-control" placeholder="Folio (Ej: ADM-0001 o OPR-1045)" required autocomplete="off">
+                <input type="password" id="login-pass" class="form-control" placeholder="••••••••" required>
+                <button type="submit" class="btn-login">LOGIN</button>
+            </form>
+
+            <form id="registro-form">
+                <input type="text" id="reg-nombre" class="form-control" placeholder="Nombre Completo" required>
+                <input type="text" id="reg-folio" class="form-control" placeholder="Nuevo Folio (ADM-XXXX o OPR-XXXX)" required autocomplete="off">
+                <input type="password" id="reg-pass" class="form-control" placeholder="Crear Contraseña" required>
+                <button type="submit" class="btn-login" style="background-color: var(--azul-rey);">REGISTRARSE</button>
+            </form>
+
+            <span class="toggle-link" id="toggle-btn">¿No tienes cuenta? Regístrate aquí</span>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const loginForm = document.getElementById('login-form');
+            const registroForm = document.getElementById('registro-form');
+            const formTitle = document.getElementById('form-title');
+            const toggleBtn = document.getElementById('toggle-btn');
+            const errorMsg = document.getElementById('error-msg');
+            
+            let isLogin = true;
+
+            // Alternar entre Login y Registro
+            toggleBtn.addEventListener('click', () => {
+                isLogin = !isLogin;
+                errorMsg.classList.add('d-none'); // Limpiar errores
+                
+                if(isLogin) {
+                    formTitle.innerText = 'Login';
+                    loginForm.style.display = 'block';
+                    registroForm.style.display = 'none';
+                    toggleBtn.innerText = '¿No tienes cuenta? Regístrate aquí';
+                } else {
+                    formTitle.innerText = 'Registro';
+                    loginForm.style.display = 'none';
+                    registroForm.style.display = 'block';
+                    toggleBtn.innerText = '¿Ya tienes cuenta? Inicia sesión';
+                }
+            });
+
+            // Función para validar la nomenclatura del folio
+            function validarFolio(folio) {
+                const folioLimpio = folio.trim().toUpperCase();
+                // Expresión regular: Empieza con ADM- o OPR-, seguido de exactamente 4 números
+                const regex = /^(ADM|OPR)-\d{4}$/;
+                
+                if (!regex.test(folioLimpio)) {
+                    return false;
+                }
+                return folioLimpio;
+            }
+
+            // Manejar envío de Login
+            loginForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const folio = document.getElementById('login-folio').value;
+                const folioValidado = validarFolio(folio);
+
+                if (!folioValidado) {
+                    errorMsg.innerText = "Formato de folio inválido. Usa ADM-XXXX u OPR-XXXX.";
+                    errorMsg.classList.remove('d-none');
+                    return;
+                }
+
+                errorMsg.classList.add('d-none');
+                
+                // Aquí determinar el rol visualmente (esto se enviará al backend)
+                const rol = folioValidado.startsWith('ADM-') ? 'Administrador' : 'Operador';
+                alert(`Conectando con PHP...\nFolio: ${folioValidado}\nRol detectado: ${rol}`);
+                
+                // window.location.href = 'dashboard.html'; // Redirigirías aquí tras validar con PHP
+            });
+
+            // Manejar envío de Registro
+            registroForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const folio = document.getElementById('reg-folio').value;
+                const folioValidado = validarFolio(folio);
+
+                if (!folioValidado) {
+                    errorMsg.innerText = "El folio debe ser ADM-XXXX u OPR-XXXX.";
+                    errorMsg.classList.remove('d-none');
+                    return;
+                }
+
+                errorMsg.classList.add('d-none');
+                alert(`Petición de registro enviada a la base de datos para: ${folioValidado}`);
+            });
+        });
+    </script>
+
+    
+</body>
+</html>
