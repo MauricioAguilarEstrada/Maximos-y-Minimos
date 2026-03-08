@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Inventario - Captura</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <script>
+        // Protección de ruta: Si no hay sesión, se regresa al login ANTES de cargar la página
+        if (localStorage.getItem('sesion_iniciada') !== 'true') {
+            window.location.href = 'login.html';
+        }
+    </script>
+
+    <style>
+        :root {
+            --azul-rey: #003366;
+            --fondo-gris: #eaeff5;
+        }
+        body {
+            background-color: var(--fondo-gris);
+            overflow-x: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        #sidebar {
+            width: 260px;
+            min-height: 100vh;
+            background-color: var(--azul-rey);
+            color: white;
+            position: fixed;
+            transition: all 0.3s;
+        }
+        #sidebar .brand-logo { background-color: rgba(0,0,0,0.1); }
+        #sidebar .nav-link {
+            color: rgba(255, 255, 255, 0.75);
+            padding: 12px 20px;
+            margin: 4px 15px;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        #sidebar .nav-link:hover, #sidebar .nav-link.active {
+            color: white;
+            background-color: rgba(255, 255, 255, 0.15);
+        }
+        
+        #main-content {
+            margin-left: 260px;
+            padding: 30px;
+            width: calc(100% - 260px);
+        }
+        
+        .fila-critica { background-color: #f8d7da !important; }
+        .fila-advertencia { background-color: #fff3cd !important; }
+        .fila-optima { background-color: #ffffff !important; }
+    </style>
+</head>
+<body>
+
+    <nav id="sidebar" class="d-flex flex-column shadow-lg">
+        <div class="brand-logo py-4 text-center mb-3">
+            <i class="fas fa-boxes fa-2x mb-2"></i>
+            <h5 class="mb-0 fw-bold">Gestión de Stock</h5>
+            <small id="user-info-display" class="text-white-50"></small>
+        </div>
+        
+        <ul class="nav flex-column mb-auto">
+            <li class="nav-item admin-only">
+                <a href="#" class="nav-link"><i class="fas fa-book me-3"></i> Catálogos</a>
+            </li>
+            <li class="nav-item">
+                <a href="#" class="nav-link active"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
+            </li>
+            <li class="nav-item admin-only">
+                <a href="#" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
+            </li>
+            <li class="nav-item admin-only">
+                <a href="#" class="nav-link"><i class="fas fa-user-cog me-3"></i> Usuarios</a>
+            </li>
+        </ul>
+        
+        <div class="mt-auto mb-4 px-3">
+            <a href="#" id="btn-cerrar-sesion" class="btn btn-outline-light w-100 text-start">
+                <i class="fas fa-sign-out-alt me-2"></i> Cerrar sesión
+            </a>
+        </div>
+    </nav>
+
+    <main id="main-content">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="h3 mb-0 text-gray-800">Captura de Movimientos</h2>
+        </div>
+
+        <div class="card shadow-sm border-0 mb-4 rounded-3">
+            <div class="card-header bg-white border-bottom-0 pt-4 pb-0 px-4">
+                <h6 class="m-0 font-weight-bold text-primary" style="color: var(--azul-rey) !important;">
+                    <i class="fas fa-barcode me-2"></i> Entrada de Código
+                </h6>
+            </div>
+            <div class="card-body p-4">
+                <input type="text" class="form-control form-control-lg bg-light" id="inputEscaner" 
+                       placeholder="El cursor está aquí. Listo para escanear..." autofocus autocomplete="off">
+            </div>
+        </div>
+
+        <div class="card shadow-sm border-0 rounded-3">
+            <div class="card-header bg-white border-bottom-0 pt-4 pb-0 px-4">
+                <h6 class="m-0 font-weight-bold text-primary" style="color: var(--azul-rey) !important;">
+                    <i class="fas fa-list me-2"></i> Detalles de la Operación
+                </h6>
+            </div>
+            <div class="card-body p-0 mt-3">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="px-4">Código</th>
+                                <th>Nombre</th>
+                                <th>Clasificación</th>
+                                <th class="text-center">Stock Actual</th>
+                                <th class="text-center">Mínimo</th>
+                                <th class="text-center">Máximo</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaProductos">
+                            <tr class="fila-optima">
+                                <td class="px-4 fw-bold text-muted">7501020304050</td>
+                                <td>Cable de Cobre Calibre 12</td>
+                                <td>Eléctrico</td>
+                                <td class="text-center fw-bold text-success">150</td>
+                                <td class="text-center text-muted">20</td>
+                                <td class="text-center text-muted">200</td>
+                            </tr>
+                            <tr class="fila-advertencia">
+                                <td class="px-4 fw-bold text-muted">7509876543210</td>
+                                <td>Cinta de Aislar Negra</td>
+                                <td>Consumibles</td>
+                                <td class="text-center fw-bold text-warning">15</td>
+                                <td class="text-center text-muted">15</td>
+                                <td class="text-center text-muted">100</td>
+                            </tr>
+                            <tr class="fila-critica">
+                                <td class="px-4 fw-bold text-muted">7501122334455</td>
+                                <td>Interruptor Termomagnético 30A</td>
+                                <td>Eléctrico</td>
+                                <td class="text-center fw-bold text-danger">2</td>
+                                <td class="text-center text-muted">10</td>
+                                <td class="text-center text-muted">50</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div class="modal fade" id="modalAlerta" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-danger text-white border-0">
+                    <h5 class="modal-title"><i class="fas fa-exclamation-triangle me-2"></i> Alerta del Sistema</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body text-center p-5">
+                    <i class="fas fa-exclamation-circle text-danger fa-5x mb-4"></i>
+                    <h4 id="textoAlerta" class="fw-bold text-dark mb-0">El producto escaneado no existe.</h4>
+                </div>
+                <div class="modal-footer justify-content-center border-0 pb-4">
+                    <button type="button" class="btn btn-danger px-5 rounded-pill" data-bs-dismiss="modal">Aceptar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- 1. LÓGICA DE ROLES Y SESIÓN ---
+            const rolUsuario = localStorage.getItem('usuario_rol');
+            const folioUsuario = localStorage.getItem('usuario_folio');
+            
+            // Mostrar quién inició sesión bajo el logo
+            document.getElementById('user-info-display').innerText = `${rolUsuario} (${folioUsuario})`;
+
+            // Ocultar menús si es Operador
+            if (rolUsuario === 'Operador') {
+                const elementosAdmin = document.querySelectorAll('.admin-only');
+                elementosAdmin.forEach(el => el.style.display = 'none');
+            }
+
+            // Botón Cerrar Sesión
+            document.getElementById('btn-cerrar-sesion').addEventListener('click', (e) => {
+                e.preventDefault();
+                localStorage.clear();
+                window.location.href = 'login.html';
+            });
+
+            // --- 2. LÓGICA DEL ESCÁNER ---
+            const inputEscaner = document.getElementById('inputEscaner');
+            const modalAlerta = new bootstrap.Modal(document.getElementById('modalAlerta'));
+            const textoAlerta = document.getElementById('textoAlerta');
+
+            // Mantener el foco
+            document.body.addEventListener('click', (e) => {
+                if (!e.target.closest('.modal') && document.activeElement !== inputEscaner) {
+                    inputEscaner.focus();
+                }
+            });
+
+            // Escuchar el escáner (Enter)
+            inputEscaner.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const codigo = this.value.trim();
+                    
+                    if (codigo !== '') {
+                        console.log('Procesando código:', codigo);
+                        
+                        // Escribe "error" y presiona Enter para ver la alerta
+                        if (codigo.toLowerCase() === 'error') {
+                            textoAlerta.innerText = 'Producto no encontrado o stock insuficiente.';
+                            modalAlerta.show();
+                        }
+                        
+                        this.value = ''; // Limpiar campo
+                    }
+                }
+            });
+            
+            // Devolver foco al cerrar el modal
+            document.getElementById('modalAlerta').addEventListener('hidden.bs.modal', () => {
+                inputEscaner.focus();
+            });
+        });
+    </script>
+</body>
+</html>
