@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Inventario - Catálogo</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <script>
+        // Protección de ruta (Ruta ajustada para carpetas)
+        if (localStorage.getItem('sesion_iniciada') !== 'true') {
+            window.location.href = '../login/login.html';
+        }
+    </script>
+
+    <style>
+        :root { --azul-rey: #003366; --fondo-gris: #eaeff5; }
+        body { background-color: var(--fondo-gris); font-family: 'Segoe UI', sans-serif; }
+        #sidebar { width: 260px; min-height: 100vh; background-color: var(--azul-rey); color: white; position: fixed; }
+        #main-content { margin-left: 260px; padding: 30px; width: calc(100% - 260px); }
+        
+        .badge-a { background-color: #d1e7dd; color: #0f5132; } /* Críticos */
+        .badge-b { background-color: #fff3cd; color: #856404; }
+        .badge-c { background-color: #f8d7da; color: #842029; }
+        
+        .btn-primario { background-color: var(--azul-rey); color: white; border-radius: 4px; }
+        .btn-primario:hover { background-color: #002244; color: white; }
+    </style>
+</head>
+<body>
+
+    <nav id="sidebar" class="d-flex flex-column shadow-lg">
+        <div class="brand-logo py-4 text-center mb-3">
+            <i class="fas fa-boxes fa-2x mb-2"></i>
+            <h5 class="mb-0 fw-bold">Gestión de Stock</h5>
+        </div>
+        <ul class="nav flex-column mb-auto">
+            <li class="nav-item">
+                <a href="#" class="nav-link active text-white"><i class="fas fa-book me-3"></i> Catálogos</a>
+            </li>
+            <li class="nav-item">
+                <a href="../panelAdminn/panelAdminn.html" class="nav-link text-white-50"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
+            </li>
+        </ul>
+        <div class="mt-auto mb-4 px-3">
+            <button id="btn-cerrar-sesion" class="btn btn-outline-light w-100"><i class="fas fa-sign-out-alt me-2"></i> Salir</button>
+        </div>
+    </nav>
+
+    <main id="main-content">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="h3 mb-0">Catálogo de Productos</h2>
+            <button class="btn btn-primario" data-bs-toggle="modal" data-bs-target="#modalAgregar">
+                <i class="fas fa-plus me-2"></i> Agregar Producto
+            </button>
+        </div>
+
+        <div class="card shadow-sm border-0 rounded-3">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="px-4">Código</th>
+                                <th>Nombre del Producto</th>
+                                <th>ABC</th>
+                                <th class="text-center">Min</th>
+                                <th class="text-center">Max</th>
+                                <th class="text-center">Empaque</th>
+                                <th class="text-center">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="listaCatalogos">
+                            <tr>
+                                <td class="px-4 fw-bold">7501020304</td>
+                                <td>Cable Cobre 12</td>
+                                <td><span class="badge badge-a">Clase A</span></td>
+                                <td class="text-center">20</td>
+                                <td class="text-center">200</td>
+                                <td class="text-center">Unidad</td>
+                                <td class="text-center">
+                                    <td class="text-center">
+    <button class="btn btn-sm btn-outline-primary" title="Editar">
+        <i class="fas fa-edit"></i>
+    </button>
+    
+    <button class="btn btn-sm btn-outline-danger" title="Eliminar">
+        <i class="fas fa-trash"></i>
+    </button>
+</td>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div class="modal fade" id="modalAgregar" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header border-0">
+                    <h5 class="modal-title fw-bold">Nuevo Registro de Producto</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="formNuevoProducto">
+                    <div class="modal-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Código de Barras</label>
+                                <input type="text" class="form-control" id="new-codigo" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Nombre</label>
+                                <input type="text" class="form-control" id="new-nombre" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Categoría ABC</label>
+                                <select class="form-select" id="new-abc">
+                                    <option value="A">Clase A (Crítico)</option>
+                                    <option value="B">Clase B (Regular)</option>
+                                    <option value="C" selected>Clase C (Baja rotación)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Estándar Empaque</label>
+                                <select class="form-select" id="new-empaque">
+                                    <option value="Unidad">Por Unidad</option>
+                                    <option value="Caja">Por Caja (Volumen)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Mínimo</label>
+                                <input type="number" class="form-control" id="new-min" required>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Máximo</label>
+                                <input type="number" class="form-control" id="new-max" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-0">
+                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primario">Guardar Producto</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Lógica para cerrar sesión (Ruta ajustada)
+        document.getElementById('btn-cerrar-sesion').addEventListener('click', () => {
+            localStorage.clear();
+            window.location.href = '../login/login.html';
+        });
+
+        // Lógica para agregar producto a la tabla (Simulado)
+        document.getElementById('formNuevoProducto').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const tabla = document.getElementById('listaCatalogos');
+            const row = `
+                <tr>
+                    <td class="px-4 fw-bold">${document.getElementById('new-codigo').value}</td>
+                    <td>${document.getElementById('new-nombre').value}</td>
+                    <td><span class="badge badge-${document.getElementById('new-abc').value.toLowerCase()}">Clase ${document.getElementById('new-abc').value}</span></td>
+                    <td class="text-center">${document.getElementById('new-min').value}</td>
+                    <td class="text-center">${document.getElementById('new-max').value}</td>
+                    <td class="text-center">${document.getElementById('new-empaque').value}</td>
+                    <td class="text-center"><button class="btn btn-sm btn-light text-primary"><i class="fas fa-edit"></i></button></td>
+                </tr>`;
+            tabla.innerHTML += row;
+            bootstrap.Modal.getInstance(document.getElementById('modalAgregar')).hide();
+            this.reset();
+        });
+    </script>
+</body>
+</html>
