@@ -1,0 +1,46 @@
+:root {
+            --azul-rey: #003366;
+            --fondo-gris: #eaeff5;
+        }
+        body {
+            background-color: var(--fondo-gris);
+            overflow-x: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        #sidebar {
+            width: 260px;
+            min-height: 100vh;
+            background-color: var(--azul-rey);
+            color: white;
+            position: fixed;
+            transition: all 0.3s;
+        }
+        #sidebar .brand-logo { background-color: rgba(0,0,0,0.1); }
+        #sidebar .nav-link {
+            color: rgba(255, 255, 255, 0.75);
+            padding: 12px 20px;
+            margin: 4px 15px;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        #sidebar .nav-link:hover, #sidebar .nav-link.active {
+            color: white;
+            background-color: rgba(255, 255, 255, 0.15);
+        }
+        
+        #main-content {
+            margin-left: 260px;
+            padding: 30px;
+            width: calc(100% - 260px);
+        }
+        
+        .fila-critica { background-color: #f8d7da !important; }
+        .fila-advertencia { background-color: #fff3cd !important; }
+        .fila-optima { background-color: #ffffff !important; }
+        .badge-a { background-color: #d1e7dd; color: #0f5132; } /* Críticos */
+        .badge-b { background-color: #fff3cd; color: #856404; }
+        .badge-c { background-color: #f8d7da; color: #842029; }
+
+        .btn-primario { background-color: var(--azul-rey); color: white; border-radius: 4px; }
+        .btn-primario:hover { background-color: #002244; color: white; }
