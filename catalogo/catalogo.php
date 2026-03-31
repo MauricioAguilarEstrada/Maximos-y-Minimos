@@ -69,8 +69,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <h5 class="mb-0 fw-bold">Gestión de Stock</h5>
         </div>
         <ul class="nav flex-column mb-auto">
+            <li class="nav-item">
+                <a href="../panelAdmin/panelAdmin.php" class="nav-link"><i class="fas fa-home me-3"></i> Inicio</a>
+            </li>
             <li class="nav-item admin-only">
-                <a href="#" class="nav-link active"><i class="fas fa-book me-3"></i> Catálogo</a>
+                <a href="../catalogo/catalogo.html" class="nav-link active"><i class="fas fa-book me-3"></i> Catálogo</a>
             </li>
             <li class="nav-item">
                 <a href="../movimientos/movimientos.html" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>

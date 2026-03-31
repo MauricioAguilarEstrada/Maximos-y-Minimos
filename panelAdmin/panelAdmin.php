@@ -48,7 +48,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
     </script>
 </head>
 <body>
-
     <nav id="sidebar" class="d-flex flex-column shadow-lg">
         <div class="brand-logo py-4 text-center mb-3">
             <i class="fas fa-boxes fa-2x mb-2"></i>
@@ -58,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
         
         <ul class="nav flex-column mb-auto">
             <li class="nav-item">
-                <a href="#" class="nav-link active"><i class="fas fa-home me-3"></i> Inicio</a>
+                <a href="../panelAdmin/panelAdmin.html" class="nav-link active"><i class="fas fa-home me-3"></i> Inicio</a>
             </li>
             <li class="nav-item admin-only">
                 <a href="../catalogo/catalogo.php" class="nav-link"><i class="fas fa-book me-3"></i> Catálogo</a>
