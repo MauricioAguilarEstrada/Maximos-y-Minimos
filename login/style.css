@@ -1,0 +1,94 @@
+        :root {
+            --azul-rey: #003366;
+            --azul-claro: #3498db;
+            --gris-input: #f2f4f6;
+        }
+
+        body, html {
+            height: 100%;
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .bg-image {
+            background-image: url('https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?q=80&w=2070&auto=format&fit=crop');
+            background-size: cover;
+            background-position: center;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .bg-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 51, 102, 0.75); 
+        }
+        .login-card {
+            background: white;
+            padding: 40px;
+            border-radius: 4px; 
+            box-shadow: 0 15px 30px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 400px;
+            z-index: 2; 
+            text-align: center;
+        }
+
+        .login-title {
+            color: #666;
+            font-weight: bold;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+
+        .form-control {
+            background-color: var(--gris-input);
+            border: none;
+            border-radius: 2px;
+            padding: 12px 15px;
+            margin-bottom: 15px;
+            text-align: center;
+            color: #555;
+        }
+
+        .form-control:focus {
+            background-color: #e8eaed;
+            box-shadow: none;
+            border: 1px solid var(--azul-claro);
+        }
+
+        .btn-login {
+            background-color: var(--azul-claro);
+            color: white;
+            border: none;
+            border-radius: 2px;
+            padding: 12px;
+            width: 100%;
+            font-weight: bold;
+            letter-spacing: 1px;
+            transition: background-color 0.3s;
+        }
+
+        .btn-login:hover {
+            background-color: #2980b9;
+        }
+
+        .toggle-link {
+            color: var(--azul-rey);
+            text-decoration: none;
+            font-size: 14px;
+            cursor: pointer;
+            margin-top: 15px;
+            display: inline-block;
+        }
+
+        .toggle-link:hover {
+            text-decoration: underline;
+        }
+
+        #registro-form {
+            display: none;
+        }
