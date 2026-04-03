@@ -1,14 +1,4 @@
-<!--<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login</title>
-</head>
-<body>
-    hola este es el login
-</body>
-</html>-->
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -17,108 +7,7 @@
     <title>Acceso al Sistema</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    
-    <style>
-        :root {
-            --azul-rey: #003366;
-            --azul-claro: #3498db; /* Azul similar al de tu imagen de referencia */
-            --gris-input: #f2f4f6;
-        }
-
-        body, html {
-            height: 100%;
-            margin: 0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-
-        /* Fondo con imagen y overlay Azul Rey */
-        .bg-image {
-            background-image: url('https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?q=80&w=2070&auto=format&fit=crop');
-            background-size: cover;
-            background-position: center;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-        }
-
-        .bg-overlay {
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background-color: rgba(0, 51, 102, 0.75); /* Capa Azul Rey transparente */
-            z-index: 1;
-        }
-
-        /* Estilos de la tarjeta de Login */
-        .login-card {
-            background: white;
-            padding: 40px;
-            border-radius: 4px; /* Bordes ligeramente cuadrados como en tu imagen */
-            box-shadow: 0 15px 30px rgba(0,0,0,0.3);
-            width: 100%;
-            max-width: 400px;
-            z-index: 2; /* Por encima del overlay */
-            text-align: center;
-        }
-
-        .login-title {
-            color: #666;
-            font-weight: bold;
-            margin-bottom: 30px;
-            font-size: 28px;
-        }
-
-        .form-control {
-            background-color: var(--gris-input);
-            border: none;
-            border-radius: 2px;
-            padding: 12px 15px;
-            margin-bottom: 15px;
-            text-align: center;
-            color: #555;
-        }
-
-        .form-control:focus {
-            background-color: #e8eaed;
-            box-shadow: none;
-            border: 1px solid var(--azul-claro);
-        }
-
-        .btn-login {
-            background-color: var(--azul-claro);
-            color: white;
-            border: none;
-            border-radius: 2px;
-            padding: 12px;
-            width: 100%;
-            font-weight: bold;
-            letter-spacing: 1px;
-            transition: background-color 0.3s;
-        }
-
-        .btn-login:hover {
-            background-color: #2980b9;
-        }
-
-        .toggle-link {
-            color: var(--azul-rey);
-            text-decoration: none;
-            font-size: 14px;
-            cursor: pointer;
-            margin-top: 15px;
-            display: inline-block;
-        }
-
-        .toggle-link:hover {
-            text-decoration: underline;
-        }
-
-        /* Ocultar formulario de registro por defecto */
-        #registro-form {
-            display: none;
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
@@ -147,7 +36,7 @@
         </div>
     </div>
 
-    <script>
+<script>
         document.addEventListener('DOMContentLoaded', () => {
             const loginForm = document.getElementById('login-form');
             const registroForm = document.getElementById('registro-form');
@@ -187,33 +76,62 @@
                 return folioLimpio;
             }
 
-            // Manejar envío de Login
-        loginForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const folio = document.getElementById('login-folio').value;
-            const folioValidado = validarFolio(folio);
+            // Manejar envío de Login con FETCH hacia PHP
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const folio = document.getElementById('login-folio').value;
+                const pass = document.getElementById('login-pass').value;
+                const folioValidado = validarFolio(folio);
 
-            if (!folioValidado) {
-                errorMsg.innerText = "Formato de folio inválido. Usa ADM-XXXX u OPR-XXXX.";
-                errorMsg.classList.remove('d-none');
-                return;
-            }
+                if (!folioValidado) {
+                    errorMsg.innerText = "Formato de folio inválido. Usa ADM-XXXX u OPR-XXXX.";
+                    errorMsg.classList.remove('d-none');
+                    return;
+                }
 
-            errorMsg.classList.add('d-none');
-    
-            // Determinamos el rol según el folio
-            const rol = folioValidado.startsWith('ADM-') ? 'Administrador' : 'Operador';
+                if (!pass) {
+                    errorMsg.innerText = "Por favor, ingresa tu contraseña.";
+                    errorMsg.classList.remove('d-none');
+                    return;
+                }
 
-            // GUARDAR SESIÓN (Esto es lo que el panel de administración revisará)
-            localStorage.setItem('sesion_iniciada', 'true');
-            localStorage.setItem('usuario_rol', rol);
-            localStorage.setItem('usuario_folio', folioValidado);
+                errorMsg.classList.add('d-none');
 
-            // REDIRECCIÓN: Salimos de la carpeta 'login' y entramos a 'panelAdminn'
-            window.location.href = '../panelAdminn/panelAdminn.html';
-        });
+                try {
+                    // Petición al backend PHP
+                    const response = await fetch('login.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ folio: folioValidado, password: pass })
+                    });
+                    
+                    const result = await response.json();
 
-            // Manejar envío de Registro
+                    if (result.success) {
+                        // Guardamos datos en el navegador para la interfaz visual
+                        localStorage.setItem('sesion_iniciada', 'true');
+                        localStorage.setItem('usuario_rol', result.rol);
+                        localStorage.setItem('usuario_folio', result.folio);
+
+                        // Redirigimos según el rol con las rutas corregidas
+                        if (result.rol === 'Administrador') {
+                            window.location.href = '../panelAdmin/panelAdmin.php'; 
+                        } else {
+                            window.location.href = '../movimientos/movimientos.php'; 
+                        }
+                    } else {
+                        // Mostrar error devuelto por la base de datos (contraseña incorrecta, etc.)
+                        errorMsg.innerText = result.message;
+                        errorMsg.classList.remove('d-none');
+                    }
+                } catch (error) {
+                    console.error("Error en el login:", error);
+                    errorMsg.innerText = "Ocurrió un error al intentar conectar con el servidor.";
+                    errorMsg.classList.remove('d-none');
+                }
+            });
+
+            // Manejar envío de Registro (Para futura implementación con backend)
             registroForm.addEventListener('submit', (e) => {
                 e.preventDefault();
                 const folio = document.getElementById('reg-folio').value;
@@ -226,11 +144,9 @@
                 }
 
                 errorMsg.classList.add('d-none');
-                alert(`Petición de registro enviada a la base de datos para: ${folioValidado}`);
+                alert(`Petición de registro enviada a la base de datos para: ${folioValidado} (Falta conectar backend de registro)`);
             });
         });
     </script>
-
-    
 </body>
 </html>

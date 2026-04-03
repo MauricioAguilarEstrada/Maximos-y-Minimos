@@ -1,46 +1,91 @@
 <?php
-// =======================================================================
-// 1. LÓGICA DE BACKEND (PHP + PDO)
-// =======================================================================
-// Aquí procesamos las peticiones AJAX que vienen del frontend.
-// Nota: Asegúrate de tener habilitada la extensión pdo_sqlsrv en tu php.ini
+session_start();
+// Asegúrate de que esta ruta apunte correctamente a tu archivo de conexión
+require_once '../cnfg/conexionBD.php'; 
 
+// =======================================================================
+// 1. LÓGICA DE BACKEND (PHP + PDO) PARA PETICIONES AJAX (POST)
+// =======================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
     
-    // Recibimos los datos enviados en formato JSON
     $data = json_decode(file_get_contents("php://input"), true);
     $accion = $data['accion'] ?? '';
 
-    /* // ESQUELETO DE CONEXIÓN PDO A SQL SERVER (Descomentar para usar)
     try {
-        $conn = new PDO("sqlsrv:server=localhost\\SQLEXPRESS;Database=InventarioDB", "usuario", "password");
-        $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $baseDeDatos = new ConexionBD();
+        $conn = $baseDeDatos->getConnection();
+
+        if ($accion === 'agregar') {
+            // Insertamos el nuevo producto. Estatus 1 = Activo. Stock inicial 0.
+            $query = "INSERT INTO PRODUCTOS (CODIGODEBARRAS, NOMBRE, DESCRIPCION, CATEGORIA, STOCKACTUAL, STOCKMINIMO, STOCKMAXIMO, ESTATUS) 
+                      VALUES (:codigo, :nombre, :descripcion, :categoria, 0, :min, :max, 1)";
+            $stmt = $conn->prepare($query);
+            $stmt->execute([
+                ':codigo' => $data['codigo'],
+                ':nombre' => $data['nombre'],
+                ':descripcion' => $data['descripcion'],
+                ':categoria' => $data['abc'],
+                ':min' => $data['min'],
+                ':max' => $data['max']
+            ]);
+            echo json_encode(['success' => true, 'message' => 'Producto agregado correctamente']);
+            exit;
+        } 
+        elseif ($accion === 'editar') {
+            // Actualizamos los datos del producto
+            $query = "UPDATE PRODUCTOS 
+                      SET CODIGODEBARRAS = :codigo, NOMBRE = :nombre, DESCRIPCION = :descripcion, 
+                          CATEGORIA = :categoria, STOCKMINIMO = :min, STOCKMAXIMO = :max, FECHAMODIFICACION = GETDATE() 
+                      WHERE CODIGODEBARRAS = :codigo_original";
+            $stmt = $conn->prepare($query);
+            $stmt->execute([
+                ':codigo' => $data['codigo'],
+                ':nombre' => $data['nombre'],
+                ':descripcion' => $data['descripcion'],
+                ':categoria' => $data['abc'],
+                ':min' => $data['min'],
+                ':max' => $data['max'],
+                ':codigo_original' => $data['codigo_original']
+            ]);
+            echo json_encode(['success' => true, 'message' => 'Producto actualizado correctamente']);
+            exit;
+        } 
+        elseif ($accion === 'eliminar') {
+            // Baja LÓGICA: Cambiamos Estatus a 0 en lugar de hacer un DELETE
+            $query = "UPDATE PRODUCTOS SET ESTATUS = 0, FECHAMODIFICACION = GETDATE() WHERE CODIGODEBARRAS = :codigo";
+            $stmt = $conn->prepare($query);
+            $stmt->execute([':codigo' => $data['codigo']]);
+            echo json_encode(['success' => true, 'message' => 'Producto dado de baja exitosamente']);
+            exit;
+        }
+
+        echo json_encode(['success' => false, 'message' => 'Acción no válida']);
+        exit;
+
     } catch(PDOException $e) {
-        echo json_encode(['success' => false, 'message' => 'Error de conexión: ' . $e->getMessage()]);
+        // Si el código de barras ya existe, SQL Server devolverá un error de restricción (Constraint)
+        if ($e->getCode() == 23000) {
+            echo json_encode(['success' => false, 'message' => 'El código de barras ya está registrado.']);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Error de BD: ' . $e->getMessage()]);
+        }
         exit;
     }
-    */
+}
 
-    // Simulador de respuestas del servidor
-    if ($accion === 'agregar') {
-        // Ejecutarías: INSERT INTO PRODUCTO (...) VALUES (...)
-        echo json_encode(['success' => true, 'message' => 'Producto agregado correctamente']);
-        exit;
-    } 
-    elseif ($accion === 'editar') {
-        // Ejecutarías: UPDATE PRODUCTO SET NOMBRE = ?, CMAXIMA = ? ... WHERE IDPRODUCTO = ?
-        echo json_encode(['success' => true, 'message' => 'Producto actualizado correctamente']);
-        exit;
-    } 
-    elseif ($accion === 'eliminar') {
-        // Ejecutarías: UPDATE PRODUCTO SET ESTATUS = 'Inactivo', FECHBAJA = GETDATE() WHERE IDPRODUCTO = ?
-        echo json_encode(['success' => true, 'message' => 'Producto dado de baja exitosamente']);
-        exit;
-    }
-
-    echo json_encode(['success' => false, 'message' => 'Acción no válida']);
-    exit;
+// =======================================================================
+// 2. LÓGICA PARA CARGAR LA VISTA HTML (GET)
+// =======================================================================
+// Traemos todos los productos activos de la base de datos
+$productos = [];
+try {
+    $baseDeDatos = new ConexionBD();
+    $conn = $baseDeDatos->getConnection();
+    $stmt = $conn->query("SELECT * FROM PRODUCTOS WHERE ESTATUS = 1 ORDER BY NOMBRE ASC");
+    $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch(PDOException $e) {
+    $error_bd = "No se pudo cargar el catálogo: " . $e->getMessage();
 }
 ?>
 
@@ -55,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link rel="stylesheet" href="../Assets/style.css">
     
     <script>
-        // Protección de ruta (Frontend)
+        // Protección de ruta (Frontend) - OPCIONAL si ya proteges por $_SESSION
         if (localStorage.getItem('sesion_iniciada') !== 'true') {
             window.location.href = '../login/login.html';
         }
@@ -73,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <a href="#" class="nav-link active"><i class="fas fa-book me-3"></i> Catálogo</a>
             </li>
             <li class="nav-item">
-                <a href="../movimientos/movimientos.html" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
+                <a href="../movimientos/movimientos.php" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
             </li>
             <li class="nav-item admin-only">
                 <a href="../reportes/reportes.html" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
@@ -95,6 +140,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </button>
         </div>
 
+        <?php if(isset($error_bd)): ?>
+            <div class="alert alert-danger"><i class="fas fa-exclamation-triangle"></i> <?= $error_bd ?></div>
+        <?php endif; ?>
+
         <div class="card shadow-sm border-0 rounded-3">
             <div class="card-body p-0">
                 <div class="table-responsive">
@@ -104,29 +153,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <th class="px-4">Código</th>
                                 <th>Nombre del Producto</th>
                                 <th>ABC</th>
-                                <th class="text-center">Min</th>
+                                <th class="text-center">Stock</th> <th class="text-center">Min</th>
                                 <th class="text-center">Max</th>
-                                <th class="text-center">Empaque</th>
                                 <th class="text-center">Acciones</th>
                             </tr>
                         </thead>
                         <tbody id="listaCatalogos">
-                            <tr data-codigo="7501020304" data-nombre="Cable Cobre 12" data-abc="A" data-min="20" data-max="200" data-empaque="Unidad">
-                                <td class="px-4 fw-bold row-codigo">7501020304</td>
-                                <td class="row-nombre">Cable Cobre 12</td>
-                                <td><span class="badge bg-danger row-abc">Clase A</span></td>
-                                <td class="text-center row-min">20</td>
-                                <td class="text-center row-max">200</td>
-                                <td class="text-center row-empaque">Unidad</td>
-                                <td class="text-center">
-                                    <button class="btn btn-sm btn-outline-primary btn-editar" title="Editar">
-                                        <i class="fas fa-edit"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-danger btn-eliminar" title="Dar de Baja">
-                                        <i class="fas fa-trash"></i>
-                                    </button>
-                                </td>
-                            </tr>
+                            <?php if(!empty($productos)): ?>
+                                <?php foreach($productos as $prod): 
+                                    $cat = trim($prod['CATEGORIA']);
+                                    $badgeColor = $cat == 'A' ? 'bg-danger' : ($cat == 'B' ? 'bg-warning text-dark' : 'bg-success');
+                                    
+                                    // Lógica para el color del stock actual
+                                    $stock = $prod['STOCKACTUAL'];
+                                    $min = $prod['STOCKMINIMO'];
+                                    $max = $prod['STOCKMAXIMO'];
+                                    $colorStock = 'text-success fw-bold'; // Óptimo (Verde)
+                                    if ($stock < $min) $colorStock = 'text-danger fw-bold'; // Crítico (Rojo)
+                                    elseif ($stock > $max) $colorStock = 'text-warning text-dark fw-bold'; // Excedente (Amarillo)
+                                ?>
+                                <tr data-codigo="<?= htmlspecialchars($prod['CODIGODEBARRAS']) ?>" 
+                                    data-nombre="<?= htmlspecialchars($prod['NOMBRE']) ?>" 
+                                    data-desc="<?= htmlspecialchars($prod['DESCRIPCION']) ?>"
+                                    data-abc="<?= $cat ?>" 
+                                    data-min="<?= $min ?>" 
+                                    data-max="<?= $max ?>">
+                                    
+                                    <td class="px-4 fw-bold row-codigo"><?= htmlspecialchars($prod['CODIGODEBARRAS']) ?></td>
+                                    <td class="row-nombre">
+                                        <?= htmlspecialchars($prod['NOMBRE']) ?><br>
+                                        <small class="text-muted row-desc"><?= htmlspecialchars($prod['DESCRIPCION']) ?></small>
+                                    </td>
+                                    <td><span class="badge <?= $badgeColor ?> row-abc">Clase <?= $cat ?></span></td>
+                                    
+                                    <td class="text-center <?= $colorStock ?> fs-5"><?= $stock ?></td>
+                                    
+                                    <td class="text-center row-min"><?= $min ?></td>
+                                    <td class="text-center row-max"><?= $max ?></td>
+                                    <td class="text-center">
+                                        <button class="btn btn-sm btn-outline-primary btn-editar" title="Editar">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger btn-eliminar" title="Dar de Baja">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <tr><td colspan="7" class="text-center text-muted py-4">No hay productos registrados.</td></tr>
+                            <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
@@ -149,8 +225,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <input type="text" class="form-control" id="add-codigo" required>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">Nombre</label>
+                                <label class="form-label">Nombre del Producto</label>
                                 <input type="text" class="form-control" id="add-nombre" required>
+                            </div>
+                            <div class="col-md-12">
+                                <label class="form-label">Descripción</label>
+                                <input type="text" class="form-control" id="add-descripcion">
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">Categoría ABC</label>
@@ -161,17 +241,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 </select>
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label">Estándar Empaque</label>
-                                <select class="form-select" id="add-empaque">
-                                    <option value="Unidad">Por Unidad</option>
-                                    <option value="Caja">Por Caja (Volumen)</option>
-                                </select>
-                            </div>
-                            <div class="col-md-2">
                                 <label class="form-label">Mínimo</label>
                                 <input type="number" class="form-control" id="add-min" required>
                             </div>
-                            <div class="col-md-2">
+                            <div class="col-md-4">
                                 <label class="form-label">Máximo</label>
                                 <input type="number" class="form-control" id="add-max" required>
                             </div>
@@ -206,6 +279,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <label class="form-label">Nombre</label>
                                 <input type="text" class="form-control" id="edit-nombre" required>
                             </div>
+                            <div class="col-md-12">
+                                <label class="form-label">Descripción</label>
+                                <input type="text" class="form-control" id="edit-descripcion">
+                            </div>
                             <div class="col-md-4">
                                 <label class="form-label">Categoría ABC</label>
                                 <select class="form-select" id="edit-abc">
@@ -215,17 +292,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 </select>
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label">Estándar Empaque</label>
-                                <select class="form-select" id="edit-empaque">
-                                    <option value="Unidad">Por Unidad</option>
-                                    <option value="Caja">Por Caja (Volumen)</option>
-                                </select>
-                            </div>
-                            <div class="col-md-2">
                                 <label class="form-label">Mínimo</label>
                                 <input type="number" class="form-control" id="edit-min" required>
                             </div>
-                            <div class="col-md-2">
+                            <div class="col-md-4">
                                 <label class="form-label">Máximo</label>
                                 <input type="number" class="form-control" id="edit-max" required>
                             </div>
@@ -260,21 +330,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Cerrar sesión
-        document.getElementById('btn-cerrar-sesion').addEventListener('click', () => {
+        // CERRAR SESIÓN (Integrado)
+        document.getElementById('btn-cerrar-sesion').addEventListener('click', (e) => {
+            e.preventDefault();
             localStorage.clear();
-            window.location.href = '../login/login.html';
+            window.location.href = '../login/logout.php';
         });
 
-        // Instancias de los modales
+        // Modales
         const modalAgregar = new bootstrap.Modal(document.getElementById('modalAgregar'));
         const modalEditar = new bootstrap.Modal(document.getElementById('modalEditar'));
         const modalEliminar = new bootstrap.Modal(document.getElementById('modalEliminar'));
 
-        // Variable para guardar la fila que estamos editando actualmente
         let filaActual = null;
 
-        // --- 1. LÓGICA: AGREGAR PRODUCTO ---
+        // --- 1. AGREGAR PRODUCTO ---
         document.getElementById('formNuevoProducto').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -282,13 +352,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 accion: 'agregar',
                 codigo: document.getElementById('add-codigo').value,
                 nombre: document.getElementById('add-nombre').value,
+                descripcion: document.getElementById('add-descripcion').value,
                 abc: document.getElementById('add-abc').value,
-                empaque: document.getElementById('add-empaque').value,
                 min: document.getElementById('add-min').value,
                 max: document.getElementById('add-max').value
             };
 
-            // Enviar a PHP
             const response = await fetch('catalogo.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -297,33 +366,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             const result = await response.json();
 
             if(result.success) {
-                // Agregar fila a la tabla dinámicamente
-                const tabla = document.getElementById('listaCatalogos');
-                const badgeColor = payload.abc === 'A' ? 'bg-danger' : (payload.abc === 'B' ? 'bg-warning' : 'bg-success');
-                
-                const row = `
-                    <tr data-codigo="${payload.codigo}" data-nombre="${payload.nombre}" data-abc="${payload.abc}" data-min="${payload.min}" data-max="${payload.max}" data-empaque="${payload.empaque}">
-                        <td class="px-4 fw-bold row-codigo">${payload.codigo}</td>
-                        <td class="row-nombre">${payload.nombre}</td>
-                        <td><span class="badge ${badgeColor} row-abc">Clase ${payload.abc}</span></td>
-                        <td class="text-center row-min">${payload.min}</td>
-                        <td class="text-center row-max">${payload.max}</td>
-                        <td class="text-center row-empaque">${payload.empaque}</td>
-                        <td class="text-center">
-                            <button class="btn btn-sm btn-outline-primary btn-editar" title="Editar"><i class="fas fa-edit"></i></button>
-                            <button class="btn btn-sm btn-outline-danger btn-eliminar" title="Dar de Baja"><i class="fas fa-trash"></i></button>
-                        </td>
-                    </tr>`;
-                tabla.innerHTML += row;
-                
-                modalAgregar.hide();
-                this.reset();
+                // En lugar de inyectar código (que puede fallar si la tabla estaba vacía), recargamos para ver los datos frescos de SQL
                 alert(result.message);
+                window.location.reload();
+            } else {
+                alert("Error: " + result.message);
             }
         });
 
-        // --- 2. DELEGACIÓN DE EVENTOS PARA EDITAR Y ELIMINAR ---
-        // Usamos delegación en la tabla porque las filas se generan dinámicamente
+        // --- 2. ABRIR MODALES PARA EDITAR/ELIMINAR ---
         document.getElementById('listaCatalogos').addEventListener('click', function(e) {
             const btnEditar = e.target.closest('.btn-editar');
             const btnEliminar = e.target.closest('.btn-eliminar');
@@ -331,12 +382,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (btnEditar) {
                 filaActual = btnEditar.closest('tr');
                 
-                // Llenar el formulario del modal de edición
                 document.getElementById('edit-codigo-original').value = filaActual.dataset.codigo;
                 document.getElementById('edit-codigo').value = filaActual.dataset.codigo;
                 document.getElementById('edit-nombre').value = filaActual.dataset.nombre;
+                document.getElementById('edit-descripcion').value = filaActual.dataset.desc;
                 document.getElementById('edit-abc').value = filaActual.dataset.abc;
-                document.getElementById('edit-empaque').value = filaActual.dataset.empaque;
                 document.getElementById('edit-min').value = filaActual.dataset.min;
                 document.getElementById('edit-max').value = filaActual.dataset.max;
                 
@@ -347,12 +397,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 filaActual = btnEliminar.closest('tr');
                 document.getElementById('delete-codigo').value = filaActual.dataset.codigo;
                 document.getElementById('txt-eliminar-nombre').innerText = `El producto "${filaActual.dataset.nombre}" pasará a inactivo.`;
-                
                 modalEliminar.show();
             }
         });
 
-        // --- 3. LÓGICA: GUARDAR EDICIÓN ---
+        // --- 3. GUARDAR EDICIÓN ---
         document.getElementById('formEditarProducto').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -361,8 +410,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 codigo_original: document.getElementById('edit-codigo-original').value,
                 codigo: document.getElementById('edit-codigo').value,
                 nombre: document.getElementById('edit-nombre').value,
+                descripcion: document.getElementById('edit-descripcion').value,
                 abc: document.getElementById('edit-abc').value,
-                empaque: document.getElementById('edit-empaque').value,
                 min: document.getElementById('edit-min').value,
                 max: document.getElementById('edit-max').value
             };
@@ -375,30 +424,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             const result = await response.json();
 
             if(result.success) {
-                // Actualizar los datos del dataset en el HTML
-                filaActual.dataset.codigo = payload.codigo;
-                filaActual.dataset.nombre = payload.nombre;
-                filaActual.dataset.abc = payload.abc;
-                filaActual.dataset.min = payload.min;
-                filaActual.dataset.max = payload.max;
-                filaActual.dataset.empaque = payload.empaque;
-
-                // Actualizar lo visual en la tabla
-                const badgeColor = payload.abc === 'A' ? 'bg-danger' : (payload.abc === 'B' ? 'bg-warning' : 'bg-success');
-                filaActual.querySelector('.row-codigo').innerText = payload.codigo;
-                filaActual.querySelector('.row-nombre').innerText = payload.nombre;
-                filaActual.querySelector('.row-abc').className = `badge ${badgeColor} row-abc`;
-                filaActual.querySelector('.row-abc').innerText = `Clase ${payload.abc}`;
-                filaActual.querySelector('.row-min').innerText = payload.min;
-                filaActual.querySelector('.row-max').innerText = payload.max;
-                filaActual.querySelector('.row-empaque').innerText = payload.empaque;
-
-                modalEditar.hide();
                 alert(result.message);
+                window.location.reload();
+            } else {
+                alert("Error: " + result.message);
             }
         });
 
-        // --- 4. LÓGICA: CONFIRMAR BAJA (ELIMINAR) ---
+        // --- 4. CONFIRMAR BAJA ---
         document.getElementById('btnConfirmarEliminar').addEventListener('click', async function() {
             const payload = {
                 accion: 'eliminar',
@@ -413,10 +446,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             const result = await response.json();
 
             if(result.success) {
-                // Removemos la fila de la vista
-                filaActual.remove();
+                filaActual.remove(); // Desaparece visualmente de la tabla
                 modalEliminar.hide();
                 alert(result.message);
+            } else {
+                alert("Error: " + result.message);
             }
         });
     </script>

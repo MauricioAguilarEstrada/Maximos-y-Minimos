@@ -64,7 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
                 <a href="../catalogo/catalogo.php" class="nav-link"><i class="fas fa-book me-3"></i> Catálogo</a>
             </li>
             <li class="nav-item">
-                <a href="../movimientos/movimientos.html" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
+                <a href="../movimientos/movimientos.php" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
             </li>
             <li class="nav-item admin-only">
                 <a href="../reportes/reportes.html" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
