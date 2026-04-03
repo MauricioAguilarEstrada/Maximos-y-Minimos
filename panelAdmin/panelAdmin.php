@@ -5,9 +5,9 @@
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['accion'] === 'obtener_stock') {
     header('Content-Type: application/json');
     
-    /* // CONEXIÓN REAL A SQL SERVER (Descomentar en producción)
+     // CONEXIÓN REAL A SQL SERVER (Descomentar en producción)
     try {
-        $conn = new PDO("sqlsrv:server=localhost\\SQLEXPRESS;Database=InventarioDB", "usuario", "password");
+        $conn = new PDO("sqlsrv:server=localhost\\SQLEXPRESS;Database=MAX_MIN", "usuario", "password");
         $stmt = $conn->query("SELECT CODIGO, NOMBRE, CATEGORIA, STOCK_ACTUAL, CMINIMA, CMAXIMA FROM PRODUCTO WHERE ESTATUS = 'Activo'");
         $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
         echo json_encode(['success' => true, 'data' => $productos]);
@@ -16,7 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
         echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
         exit;
     }
-    */
+    
 
     // DATOS SIMULADOS PARA PRUEBAS (Mock Data)
     $productos = [
