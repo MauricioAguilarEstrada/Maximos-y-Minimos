@@ -84,7 +84,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
         // --- D) Detalle en Tabla (Últimos 50 movimientos del filtro) ---
         $queryDetalle = "
             SELECT TOP 50 
-                T.MOTIVO, P.NOMBRE as PRODUCTO, D.CANTIDAD, U.NOMBRE as USUARIO
+                T.MOTIVO, P.NOMBRE as PRODUCTO, D.CANTIDAD, U.NOMBRE as USUARIO,
+                FORMAT(M.FECHAHORA, 'dd/MM/yyyy HH:mm') AS FECHA_MOV
             FROM MOVIMIENTOS M
             INNER JOIN DETALLESMOVIMIENTOS D ON M.IDMOVIMIENTO = D.IDMOVIMIENTO
             INNER JOIN PRODUCTOS P ON D.IDPRODUCTO = P.IDPRODUCTO
@@ -264,6 +265,7 @@ try {
                                 <th>Producto</th>
                                 <th class="text-center">Cantidad</th>
                                 <th>Usuario Responsable</th>
+                                <th class="text-end pe-4">Fecha/Hora</th> 
                             </tr>
                         </thead>
                         <tbody id="tablaReporte">
@@ -383,6 +385,7 @@ try {
                 datosRaw.forEach(row => {
                     const badge = row.MOTIVO === 'Entrada' ? 'bg-success' : 'bg-danger';
                     const signo = row.MOTIVO === 'Entrada' ? '+' : '-';
+                    const fecha = row.FECHA_MOV ? row.FECHA_MOV : 'N/D'; // Variable para la fecha
                     
                     const tr = `
                         <tr>
@@ -390,6 +393,7 @@ try {
                             <td>${row.PRODUCTO}</td>
                             <td class="text-center fw-bold text-muted">${signo}${row.CANTIDAD}</td>
                             <td><i class="fas fa-user-circle text-secondary me-2"></i>${row.USUARIO}</td>
+                            <td class="text-end pe-4 text-muted"><small><i class="far fa-clock me-1"></i>${fecha}</small></td>
                         </tr>
                     `;
                     tbody.innerHTML += tr;

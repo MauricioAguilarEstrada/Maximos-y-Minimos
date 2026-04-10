@@ -42,7 +42,8 @@ try {
     // 2. Obtener las últimas 15 actividades (Movimientos) del usuario
     $queryActividad = "
         SELECT TOP 15 
-            T.MOTIVO, P.NOMBRE as PRODUCTO, D.CANTIDAD
+            T.MOTIVO, P.NOMBRE as PRODUCTO, D.CANTIDAD,
+            FORMAT(M.FECHAHORA, 'dd/MM/yyyy HH:mm') AS FECHA_MOV
         FROM MOVIMIENTOS M
         INNER JOIN DETALLESMOVIMIENTOS D ON M.IDMOVIMIENTO = D.IDMOVIMIENTO
         INNER JOIN PRODUCTOS P ON D.IDPRODUCTO = P.IDPRODUCTO
@@ -181,6 +182,7 @@ try {
                                             <strong><?= $textoAccion ?> <?= $act['CANTIDAD'] ?> unidades</strong> de 
                                             <span class="text-primary fw-bold"><?= htmlspecialchars($act['PRODUCTO']) ?></span>
                                         </p>
+                                        <small class="text-muted"><i class="far fa-clock me-1"></i><?= $act['FECHA_MOV'] ?? 'N/D' ?></small>
                                     </div>
                                 </div>
                                 <?php endforeach; ?>
