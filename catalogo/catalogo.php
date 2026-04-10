@@ -91,7 +91,19 @@ $productos = [];
 try {
     $baseDeDatos = new ConexionBD();
     $conn = $baseDeDatos->getConnection();
-    $stmt = $conn->query("SELECT * FROM PRODUCTOS ORDER BY ESTATUS DESC, NOMBRE ASC");
+    
+    // NUEVA CONSULTA: Ordena primero activos, luego los que rompen límites, luego alfabéticamente
+    $query = "
+        SELECT * FROM PRODUCTOS 
+        ORDER BY 
+            ESTATUS DESC,
+            CASE 
+                WHEN STOCKACTUAL < STOCKMINIMO OR STOCKACTUAL > STOCKMAXIMO THEN 0
+                ELSE 1
+            END ASC,
+            NOMBRE ASC
+    ";
+    $stmt = $conn->query($query);
     $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch(PDOException $e) {
     $error_bd = "No se pudo cargar el catálogo: " . $e->getMessage();
@@ -199,22 +211,40 @@ try {
                             </tr>
                         </thead>
                         <tbody id="listaCatalogos">
+                            <?php $totalCriticos = 0; ?>
                             <?php if(!empty($productos)): ?>
                                 <?php foreach($productos as $prod): 
                                     $cat = trim($prod['CATEGORIA']);
                                     $badgeColor = $cat == 'A' ? 'bg-danger' : ($cat == 'B' ? 'bg-warning text-dark' : 'bg-success');
                                     
-                                    // Stock colors
+                                    // Stock y límites
                                     $stock = $prod['STOCKACTUAL'];
                                     $min = $prod['STOCKMINIMO'];
                                     $max = $prod['STOCKMAXIMO'];
-                                    $colorStock = 'text-success fw-bold'; 
-                                    if ($stock < $min) $colorStock = 'text-danger fw-bold'; 
-                                    elseif ($stock > $max) $colorStock = 'text-warning text-dark fw-bold'; 
+                                    
+                                    // Validación de estados críticos
+                                    $esCritico = ($stock < $min || $stock > $max);
+                                    if ($esCritico && $prod['ESTATUS'] == 1) {
+                                        $totalCriticos++;
+                                    }
 
-                                    // Status colors
+                                    // Color del texto del stock
+                                    $colorStock = 'text-success fw-bold'; 
+                                    if ($esCritico) {
+                                        $colorStock = 'text-danger fw-bold'; 
+                                    }
+
+                                    // Color del Estatus
                                     $estatusTexto = $prod['ESTATUS'] == 1 ? 'Activo' : 'Inactivo';
                                     $badgeEstatus = $prod['ESTATUS'] == 1 ? 'bg-success' : 'bg-secondary';
+
+                                    // Color del fondo de la fila entera
+                                    $claseFila = '';
+                                    if ($prod['ESTATUS'] == 0) {
+                                        $claseFila = 'bg-light text-muted';
+                                    } elseif ($esCritico) {
+                                        $claseFila = 'table-warning';
+                                    }
                                 ?>
                                 <tr data-codigo="<?= htmlspecialchars($prod['CODIGODEBARRAS']) ?>" 
                                     data-nombre="<?= htmlspecialchars($prod['NOMBRE']) ?>" 
@@ -223,7 +253,7 @@ try {
                                     data-min="<?= $min ?>" 
                                     data-max="<?= $max ?>"
                                     data-estatus="<?= $prod['ESTATUS'] ?>"
-                                    class="<?= $prod['ESTATUS'] == 0 ? 'bg-light text-muted' : '' ?>">
+                                    class="<?= $claseFila ?>">
                                     
                                     <td class="px-4 fw-bold row-codigo"><?= htmlspecialchars($prod['CODIGODEBARRAS']) ?></td>
                                     <td class="row-nombre">
@@ -268,6 +298,25 @@ try {
             </div>
         </div>
     </main>
+
+    <div class="modal fade" id="modalAlertaInicial" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-warning text-dark border-0">
+                    <h5 class="modal-title"><i class="fas fa-exclamation-triangle me-2"></i> Alertas de Inventario</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body text-center p-4">
+                    <h5 class="mb-3 fw-bold text-dark">¡Atención!</h5>
+                    <p class="text-muted fs-5">Actualmente hay <strong><span id="txt-num-criticos" class="text-danger"></span> producto(s)</strong> con niveles críticos (por debajo del mínimo o por encima del máximo).</p>
+                    <p class="text-muted">Se muestran resaltados en amarillo al inicio de tu catálogo.</p>
+                </div>
+                <div class="modal-footer justify-content-center border-0 pb-4">
+                    <button type="button" class="btn btn-warning fw-bold px-5 rounded-pill" data-bs-dismiss="modal">Entendido</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div class="modal fade" id="modalAgregar" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg">
@@ -394,6 +443,12 @@ try {
     <script>
         document.addEventListener('DOMContentLoaded', () => {
 
+            const totalCriticos = <?= $totalCriticos ?? 0 ?>;
+            if (totalCriticos > 0) {
+                document.getElementById('txt-num-criticos').innerText = totalCriticos;
+                const modalAlertaInicial = new bootstrap.Modal(document.getElementById('modalAlertaInicial'));
+                modalAlertaInicial.show();
+            }
             // --- LÓGICA DE ROLES EN LA VISTA ---
             const rolUsuario = localStorage.getItem('usuario_rol') || 'Administrador';
             if (rolUsuario === 'Operador') {

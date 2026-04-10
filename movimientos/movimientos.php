@@ -141,7 +141,8 @@ try {
     // Consulta con JOIN para traer información completa
     $queryHistorial = "
         SELECT TOP 10 
-            T.MOTIVO, P.NOMBRE as PRODUCTO, D.CANTIDAD, U.ACCESO as USUARIO
+            T.MOTIVO, P.NOMBRE as PRODUCTO, D.CANTIDAD, U.ACCESO as USUARIO,
+            FORMAT(M.FECHAHORA, 'dd/MM/yyyy HH:mm') AS FECHA_MOV
         FROM MOVIMIENTOS M
         INNER JOIN DETALLESMOVIMIENTOS D ON M.IDMOVIMIENTO = D.IDMOVIMIENTO
         INNER JOIN PRODUCTOS P ON D.IDPRODUCTO = P.IDPRODUCTO
@@ -279,6 +280,7 @@ try {
                                         <th>Producto</th>
                                         <th class="text-center">Cant.</th>
                                         <th class="text-center">Usuario</th>
+                                        <th class="text-end pe-4">Fecha/Hora</th> 
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -294,6 +296,7 @@ try {
                                             <td><?= htmlspecialchars($mov['PRODUCTO']) ?></td>
                                             <td class="text-center fw-bold text-muted"><?= $signo . $mov['CANTIDAD'] ?></td>
                                             <td class="text-center text-muted"><?= htmlspecialchars($mov['USUARIO']) ?></td>
+                                            <td class="text-end pe-4 text-muted"><small><?= $mov['FECHA_MOV'] ?? 'N/D' ?></small></td>
                                         </tr>
                                         <?php endforeach; ?>
                                     <?php endif; ?>
