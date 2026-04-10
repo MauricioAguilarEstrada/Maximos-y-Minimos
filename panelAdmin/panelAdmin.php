@@ -1,33 +1,41 @@
 <?php
+session_start();
+// Importamos la conexión real
+require_once '../cnfg/conexionBD.php';
+
 // =======================================================================
 // 1. LÓGICA DE BACKEND (PHP + PDO) - API DE CONSULTA DE STOCK
 // =======================================================================
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['accion'] === 'obtener_stock') {
     header('Content-Type: application/json');
     
-    /* // CONEXIÓN REAL A SQL SERVER (Descomentar en producción)
     try {
-        $conn = new PDO("sqlsrv:server=localhost\\SQLEXPRESS;Database=InventarioDB", "usuario", "password");
-        $stmt = $conn->query("SELECT CODIGO, NOMBRE, CATEGORIA, STOCK_ACTUAL, CMINIMA, CMAXIMA FROM PRODUCTO WHERE ESTATUS = 'Activo'");
+        $db = new ConexionBD();
+        $conn = $db->getConnection();
+        
+        // Hacemos la consulta real. 
+        // Usamos "AS" para renombrar temporalmente las columnas y que el JavaScript del frontend no se rompa.
+        $query = "SELECT 
+                    CODIGODEBARRAS AS codigo, 
+                    NOMBRE AS nombre, 
+                    CATEGORIA AS categoria, 
+                    STOCKACTUAL AS stock_actual, 
+                    STOCKMINIMO AS cminima, 
+                    STOCKMAXIMO AS cmaxima 
+                  FROM PRODUCTOS 
+                  WHERE ESTATUS = 1";
+                  
+        $stmt = $conn->query($query);
         $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Devolvemos los datos reales en formato JSON
         echo json_encode(['success' => true, 'data' => $productos]);
         exit;
+
     } catch(PDOException $e) {
-        echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
+        echo json_encode(['success' => false, 'message' => 'Error al conectar con la base de datos: ' . $e->getMessage()]);
         exit;
     }
-    */
-
-    // DATOS SIMULADOS PARA PRUEBAS (Mock Data)
-    $productos = [
-        ['codigo' => '7501020304050', 'nombre' => 'Cable de Cobre Calibre 12', 'categoria' => 'A', 'stock_actual' => 150, 'cminima' => 20, 'cmaxima' => 200],
-        ['codigo' => '7509876543210', 'nombre' => 'Cinta de Aislar Negra', 'categoria' => 'C', 'stock_actual' => 15, 'cminima' => 15, 'cmaxima' => 100],
-        ['codigo' => '7501122334455', 'nombre' => 'Interruptor Termomagnético 30A', 'categoria' => 'A', 'stock_actual' => 2, 'cminima' => 10, 'cmaxima' => 50],
-        ['codigo' => '7509988776655', 'nombre' => 'Caja de Herramientas Básica', 'categoria' => 'B', 'stock_actual' => 45, 'cminima' => 5, 'cmaxima' => 30] 
-    ];
-
-    echo json_encode(['success' => true, 'data' => $productos]);
-    exit;
 }
 ?>
 
@@ -53,24 +61,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
         <div class="brand-logo py-4 text-center mb-3">
             <i class="fas fa-boxes fa-2x mb-2"></i>
             <h5 class="mb-0 fw-bold">Gestión de Stock</h5>
-            <small id="user-info-display" class="text-white-50"></small>
+            <small class="text-white-50">
+                <?= isset($_SESSION['usuario_rol']) ? htmlspecialchars($_SESSION['usuario_rol']) : 'Usuario' ?> 
+                (<?= isset($_SESSION['usuario_folio']) ? htmlspecialchars($_SESSION['usuario_folio']) : 'Sin Folio' ?>)
+            </small>
         </div>
         
         <ul class="nav flex-column mb-auto">
             <li class="nav-item">
-                <a href="#" class="nav-link active"><i class="fas fa-home me-3"></i> Inicio</a>
+                <a href="../panelAdmin/panelAdmin.php" class="nav-link"><i class="fas fa-home me-3"></i> Inicio</a>
             </li>
-            <li class="nav-item admin-only">
+            <li class="nav-item">
+                <a href="../perfil/perfil.php" class="nav-link"><i class="fas fa-user-circle me-3"></i> Mi Perfil</a>
+            </li>
+            <li class="nav-item">
                 <a href="../catalogo/catalogo.php" class="nav-link"><i class="fas fa-book me-3"></i> Catálogo</a>
             </li>
             <li class="nav-item">
                 <a href="../movimientos/movimientos.php" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
             </li>
-            <li class="nav-item admin-only">
-                <a href="../reportes/reportes.html" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
+            
+            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+                <a href="../reportes/reportes.php" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
             </li>
-            <li class="nav-item admin-only">
-                <a href="../usuarios/usuarios.html" class="nav-link"><i class="fas fa-user-cog me-3"></i> Usuarios</a>
+            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+                <a href="../usuarios/usuarios.php" class="nav-link"><i class="fas fa-user-cog me-3"></i> Usuarios</a>
             </li>
         </ul>
         
@@ -191,9 +206,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
         document.addEventListener('DOMContentLoaded', () => {
             // --- 1. LÓGICA DE ROLES Y SESIÓN ---
             const rolUsuario = localStorage.getItem('usuario_rol') || 'Administrador';
-            const folioUsuario = localStorage.getItem('usuario_folio') || 'ADM-0011';
-            
-            document.getElementById('user-info-display').innerText = `${rolUsuario} (${folioUsuario})`;
 
             if (rolUsuario === 'Operador') {
                 const elementosAdmin = document.querySelectorAll('.admin-only');
@@ -203,7 +215,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
             document.getElementById('btn-cerrar-sesion').addEventListener('click', (e) => {
                 e.preventDefault();
                 localStorage.clear();
-                window.location.href = 'login.html';
+                window.location.href = '../cnfg/logout.php';
             });
 
             // Poner fecha actual
@@ -227,6 +239,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
                         inventarioGlobal = result.data;
                         renderizarTabla(inventarioGlobal);
                         actualizarKPIs(inventarioGlobal);
+                    } else {
+                        tabla.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-4">${result.message}</td></tr>`;
                     }
                 } catch (error) {
                     console.error("Error cargando inventario:", error);
@@ -234,7 +248,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
                 }
             }
 
-            // Aquí utilizamos TUS clases originales del CSS
             function evaluarEstado(stock, min, max) {
                 stock = parseInt(stock); min = parseInt(min); max = parseInt(max);
                 if (stock < min) return { rowClass: 'fila-critica', textClass: 'text-danger', valor: 'CRITICO' };
@@ -246,7 +259,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
                 tabla.innerHTML = '';
                 
                 if(datos.length === 0) {
-                    tabla.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No se encontraron productos.</td></tr>';
+                    tabla.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No se encontraron productos activos.</td></tr>';
                     return;
                 }
 
@@ -291,7 +304,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
                     const estado = evaluarEstado(prod.stock_actual, prod.cminima, prod.cmaxima);
                     
                     const cumpleTexto = prod.codigo.toLowerCase().includes(texto) || prod.nombre.toLowerCase().includes(texto);
-                    const cumpleAbc = (abc === 'ALL') || (prod.categoria === abc);
+                    const cumpleAbc = (abc === 'ALL') || (prod.categoria.trim() === abc);
                     const cumpleAlerta = (alerta === 'ALL') || (estado.valor === alerta);
 
                     return cumpleTexto && cumpleAbc && cumpleAlerta;

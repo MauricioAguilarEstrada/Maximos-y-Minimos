@@ -1,10 +1,10 @@
 <?php
 session_start();
 //Vacia la sesion del cliente
-$_SESSION = []
+$_SESSION = [];
 //Elimina la sesion del servidor
 session_destroy();
 //Redirige al login xD
-header("Location: login.html");
+header("Location: ../login/login.html");
 exit();
 ?>

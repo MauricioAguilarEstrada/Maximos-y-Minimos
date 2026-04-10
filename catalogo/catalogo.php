@@ -1,6 +1,5 @@
 <?php
 session_start();
-// Asegúrate de que esta ruta apunte correctamente a tu archivo de conexión
 require_once '../cnfg/conexionBD.php'; 
 
 // =======================================================================
@@ -17,7 +16,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $conn = $baseDeDatos->getConnection();
 
         if ($accion === 'agregar') {
-            // Insertamos el nuevo producto. Estatus 1 = Activo. Stock inicial 0.
             $query = "INSERT INTO PRODUCTOS (CODIGODEBARRAS, NOMBRE, DESCRIPCION, CATEGORIA, STOCKACTUAL, STOCKMINIMO, STOCKMAXIMO, ESTATUS) 
                       VALUES (:codigo, :nombre, :descripcion, :categoria, 0, :min, :max, 1)";
             $stmt = $conn->prepare($query);
@@ -33,7 +31,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         } 
         elseif ($accion === 'editar') {
-            // Actualizamos los datos del producto
             $query = "UPDATE PRODUCTOS 
                       SET CODIGODEBARRAS = :codigo, NOMBRE = :nombre, DESCRIPCION = :descripcion, 
                           CATEGORIA = :categoria, STOCKMINIMO = :min, STOCKMAXIMO = :max, FECHAMODIFICACION = GETDATE() 
@@ -51,12 +48,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['success' => true, 'message' => 'Producto actualizado correctamente']);
             exit;
         } 
-        elseif ($accion === 'eliminar') {
-            // Baja LÓGICA: Cambiamos Estatus a 0 en lugar de hacer un DELETE
-            $query = "UPDATE PRODUCTOS SET ESTATUS = 0, FECHAMODIFICACION = GETDATE() WHERE CODIGODEBARRAS = :codigo";
+        elseif ($accion === 'cambiar_estatus') {
+            $query = "UPDATE PRODUCTOS SET ESTATUS = :estatus, FECHAMODIFICACION = GETDATE() WHERE CODIGODEBARRAS = :codigo";
             $stmt = $conn->prepare($query);
-            $stmt->execute([':codigo' => $data['codigo']]);
-            echo json_encode(['success' => true, 'message' => 'Producto dado de baja exitosamente']);
+            $stmt->execute([
+                ':estatus' => $data['estatus'],
+                ':codigo' => $data['codigo']
+            ]);
+            echo json_encode(['success' => true, 'message' => 'El estatus del producto ha sido actualizado.']);
+            exit;
+        }
+        elseif ($accion === 'autorizar_admin') {
+            $stmt = $conn->prepare("SELECT IDUSUARIO FROM USUARIOS WHERE ROL = 'Administrador' AND PASSWRD = :pass AND ESTATUS = 1");
+            $stmt->execute([':pass' => $data['password']]);
+            $admin = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($admin) {
+                echo json_encode(['success' => true]);
+            } else {
+                echo json_encode(['success' => false, 'message' => 'Contraseña incorrecta o el usuario no es Administrador.']);
+            }
             exit;
         }
 
@@ -64,7 +75,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
 
     } catch(PDOException $e) {
-        // Si el código de barras ya existe, SQL Server devolverá un error de restricción (Constraint)
         if ($e->getCode() == 23000) {
             echo json_encode(['success' => false, 'message' => 'El código de barras ya está registrado.']);
         } else {
@@ -77,12 +87,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // =======================================================================
 // 2. LÓGICA PARA CARGAR LA VISTA HTML (GET)
 // =======================================================================
-// Traemos todos los productos activos de la base de datos
 $productos = [];
 try {
     $baseDeDatos = new ConexionBD();
     $conn = $baseDeDatos->getConnection();
-    $stmt = $conn->query("SELECT * FROM PRODUCTOS WHERE ESTATUS = 1 ORDER BY NOMBRE ASC");
+    $stmt = $conn->query("SELECT * FROM PRODUCTOS ORDER BY ESTATUS DESC, NOMBRE ASC");
     $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch(PDOException $e) {
     $error_bd = "No se pudo cargar el catálogo: " . $e->getMessage();
@@ -98,13 +107,6 @@ try {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="../Assets/style.css">
-    
-    <script>
-        // Protección de ruta (Frontend) - OPCIONAL si ya proteges por $_SESSION
-        if (localStorage.getItem('sesion_iniciada') !== 'true') {
-            window.location.href = '../login/login.html';
-        }
-    </script>
 </head>
 <body>
 
@@ -112,19 +114,30 @@ try {
         <div class="brand-logo py-4 text-center mb-3">
             <i class="fas fa-boxes fa-2x mb-2"></i>
             <h5 class="mb-0 fw-bold">Gestión de Stock</h5>
+            <small class="text-white-50">
+                <?= isset($_SESSION['usuario_rol']) ? htmlspecialchars($_SESSION['usuario_rol']) : 'Usuario' ?> 
+                (<?= isset($_SESSION['usuario_folio']) ? htmlspecialchars($_SESSION['usuario_folio']) : 'Sin Folio' ?>)
+            </small>
         </div>
         <ul class="nav flex-column mb-auto">
-            <li class="nav-item admin-only">
-                <a href="#" class="nav-link active"><i class="fas fa-book me-3"></i> Catálogo</a>
+            <li class="nav-item">
+                <a href="../panelAdmin/panelAdmin.php" class="nav-link"><i class="fas fa-home me-3"></i> Inicio</a>
+            </li>
+            <li class="nav-item">
+                <a href="../perfil/perfil.php" class="nav-link"><i class="fas fa-user-circle me-3"></i> Mi Perfil</a>
+            </li>
+            <li class="nav-item">
+                <a href="../catalogo/catalogo.php" class="nav-link"><i class="fas fa-book me-3"></i> Catálogo</a>
             </li>
             <li class="nav-item">
                 <a href="../movimientos/movimientos.php" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
             </li>
-            <li class="nav-item admin-only">
-                <a href="../reportes/reportes.html" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
+            
+            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+                <a href="../reportes/reportes.php" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
             </li>
-            <li class="nav-item admin-only">
-                <a href="../usuarios/usuarios.html" class="nav-link"><i class="fas fa-user-cog me-3"></i> Usuarios</a>
+            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+                <a href="../usuarios/usuarios.php" class="nav-link"><i class="fas fa-user-cog me-3"></i> Usuarios</a>
             </li>
         </ul>
         <div class="mt-auto mb-4 px-3">
@@ -135,7 +148,7 @@ try {
     <main id="main-content">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2 class="h3 mb-0">Catálogo de Productos</h2>
-            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalAgregar">
+            <button class="btn btn-primary admin-only" data-bs-toggle="modal" data-bs-target="#modalAgregar">
                 <i class="fas fa-plus me-2"></i> Agregar Producto
             </button>
         </div>
@@ -143,6 +156,32 @@ try {
         <?php if(isset($error_bd)): ?>
             <div class="alert alert-danger"><i class="fas fa-exclamation-triangle"></i> <?= $error_bd ?></div>
         <?php endif; ?>
+
+        <div class="card shadow-sm border-0 rounded-3 mb-4">
+            <div class="card-body p-3 d-flex flex-wrap gap-3 align-items-center bg-white rounded-3">
+                <div class="flex-grow-1">
+                    <div class="input-group">
+                        <span class="input-group-text bg-light border-end-0 text-muted"><i class="fas fa-search"></i></span>
+                        <input type="text" class="form-control bg-light border-start-0 ps-0" id="inputBuscador" placeholder="Buscar por código, nombre o descripción..." autocomplete="off">
+                    </div>
+                </div>
+                <div style="min-width: 200px;">
+                    <select id="filtro-abc" class="form-select text-secondary border-secondary">
+                        <option value="ALL">Todas las Categorías</option>
+                        <option value="A">Clase A (Crítico)</option>
+                        <option value="B">Clase B (Regular)</option>
+                        <option value="C">Clase C (Baja rotación)</option>
+                    </select>
+                </div>
+                <div style="min-width: 180px;">
+                    <select id="filtro-estatus" class="form-select text-secondary border-secondary">
+                        <option value="ALL">Todos los Estatus</option>
+                        <option value="1">Activos</option>
+                        <option value="0">Inactivos</option>
+                    </select>
+                </div>
+            </div>
+        </div>
 
         <div class="card shadow-sm border-0 rounded-3">
             <div class="card-body p-0">
@@ -153,8 +192,9 @@ try {
                                 <th class="px-4">Código</th>
                                 <th>Nombre del Producto</th>
                                 <th>ABC</th>
-                                <th class="text-center">Stock</th> <th class="text-center">Min</th>
-                                <th class="text-center">Max</th>
+                                <th class="text-center">Stock</th>
+                                <th class="text-center">Límites (Mín/Máx)</th>
+                                <th class="text-center">Estatus</th>
                                 <th class="text-center">Acciones</th>
                             </tr>
                         </thead>
@@ -164,20 +204,26 @@ try {
                                     $cat = trim($prod['CATEGORIA']);
                                     $badgeColor = $cat == 'A' ? 'bg-danger' : ($cat == 'B' ? 'bg-warning text-dark' : 'bg-success');
                                     
-                                    // Lógica para el color del stock actual
+                                    // Stock colors
                                     $stock = $prod['STOCKACTUAL'];
                                     $min = $prod['STOCKMINIMO'];
                                     $max = $prod['STOCKMAXIMO'];
-                                    $colorStock = 'text-success fw-bold'; // Óptimo (Verde)
-                                    if ($stock < $min) $colorStock = 'text-danger fw-bold'; // Crítico (Rojo)
-                                    elseif ($stock > $max) $colorStock = 'text-warning text-dark fw-bold'; // Excedente (Amarillo)
+                                    $colorStock = 'text-success fw-bold'; 
+                                    if ($stock < $min) $colorStock = 'text-danger fw-bold'; 
+                                    elseif ($stock > $max) $colorStock = 'text-warning text-dark fw-bold'; 
+
+                                    // Status colors
+                                    $estatusTexto = $prod['ESTATUS'] == 1 ? 'Activo' : 'Inactivo';
+                                    $badgeEstatus = $prod['ESTATUS'] == 1 ? 'bg-success' : 'bg-secondary';
                                 ?>
                                 <tr data-codigo="<?= htmlspecialchars($prod['CODIGODEBARRAS']) ?>" 
                                     data-nombre="<?= htmlspecialchars($prod['NOMBRE']) ?>" 
                                     data-desc="<?= htmlspecialchars($prod['DESCRIPCION']) ?>"
                                     data-abc="<?= $cat ?>" 
                                     data-min="<?= $min ?>" 
-                                    data-max="<?= $max ?>">
+                                    data-max="<?= $max ?>"
+                                    data-estatus="<?= $prod['ESTATUS'] ?>"
+                                    class="<?= $prod['ESTATUS'] == 0 ? 'bg-light text-muted' : '' ?>">
                                     
                                     <td class="px-4 fw-bold row-codigo"><?= htmlspecialchars($prod['CODIGODEBARRAS']) ?></td>
                                     <td class="row-nombre">
@@ -188,15 +234,28 @@ try {
                                     
                                     <td class="text-center <?= $colorStock ?> fs-5"><?= $stock ?></td>
                                     
-                                    <td class="text-center row-min"><?= $min ?></td>
-                                    <td class="text-center row-max"><?= $max ?></td>
                                     <td class="text-center">
-                                        <button class="btn btn-sm btn-outline-primary btn-editar" title="Editar">
+                                        <small class="text-muted">Min: <span class="fw-bold"><?= $min ?></span> / Max: <span class="fw-bold"><?= $max ?></span></small>
+                                    </td>
+
+                                    <td class="text-center">
+                                        <span class="badge <?= $badgeEstatus ?>"><?= $estatusTexto ?></span>
+                                    </td>
+
+                                    <td class="text-center">
+                                        <button class="btn btn-sm btn-outline-primary btn-editar admin-only" title="Editar">
                                             <i class="fas fa-edit"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-outline-danger btn-eliminar" title="Dar de Baja">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
+                                        
+                                        <?php if($prod['ESTATUS'] == 1): ?>
+                                            <button class="btn btn-sm btn-outline-warning btn-estatus ms-1" data-accion="0" title="Pausar / Desactivar Producto">
+                                                <i class="fas fa-ban"></i>
+                                            </button>
+                                        <?php else: ?>
+                                            <button class="btn btn-sm btn-outline-success btn-estatus ms-1" data-accion="1" title="Activar Producto">
+                                                <i class="fas fa-check-circle"></i>
+                                            </button>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
@@ -269,7 +328,6 @@ try {
                 <form id="formEditarProducto">
                     <div class="modal-body">
                         <input type="hidden" id="edit-codigo-original">
-                        
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <label class="form-label">Código de Barras</label>
@@ -310,19 +368,23 @@ try {
         </div>
     </div>
 
-    <div class="modal fade" id="modalEliminar" tabindex="-1" aria-hidden="true">
+    <div class="modal fade" id="modalAutorizarCat" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
         <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content text-center">
-                <div class="modal-body p-5">
-                    <i class="fas fa-exclamation-triangle text-warning fa-4x mb-3"></i>
-                    <h5 class="fw-bold">¿Dar de baja este producto?</h5>
-                    <p class="text-muted" id="txt-eliminar-nombre">El producto pasará a estado inactivo.</p>
-                    <input type="hidden" id="delete-codigo">
-                    
-                    <div class="d-flex justify-content-center gap-3 mt-4">
-                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
-                        <button type="button" class="btn btn-danger" id="btnConfirmarEliminar">Sí, dar de baja</button>
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-warning text-dark border-0">
+                    <h5 class="modal-title"><i class="fas fa-lock me-2"></i> Autorización Requerida</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body text-center p-4">
+                    <h5 class="mb-4">Se requiere permiso de Administrador para modificar el estatus de este producto.</h5>
+                    <div class="form-floating mb-3">
+                        <input type="password" class="form-control" id="adminPassCat" placeholder="Contraseña">
+                        <label for="adminPassCat">Contraseña de Administrador</label>
                     </div>
+                </div>
+                <div class="modal-footer justify-content-center border-0 pb-4">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-warning fw-bold" id="btnAutorizarCat">Autorizar</button>
                 </div>
             </div>
         </div>
@@ -330,128 +392,206 @@ try {
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // CERRAR SESIÓN (Integrado)
-        document.getElementById('btn-cerrar-sesion').addEventListener('click', (e) => {
-            e.preventDefault();
-            localStorage.clear();
-            window.location.href = '../login/logout.php';
-        });
+        document.addEventListener('DOMContentLoaded', () => {
 
-        // Modales
-        const modalAgregar = new bootstrap.Modal(document.getElementById('modalAgregar'));
-        const modalEditar = new bootstrap.Modal(document.getElementById('modalEditar'));
-        const modalEliminar = new bootstrap.Modal(document.getElementById('modalEliminar'));
-
-        let filaActual = null;
-
-        // --- 1. AGREGAR PRODUCTO ---
-        document.getElementById('formNuevoProducto').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            const payload = {
-                accion: 'agregar',
-                codigo: document.getElementById('add-codigo').value,
-                nombre: document.getElementById('add-nombre').value,
-                descripcion: document.getElementById('add-descripcion').value,
-                abc: document.getElementById('add-abc').value,
-                min: document.getElementById('add-min').value,
-                max: document.getElementById('add-max').value
-            };
-
-            const response = await fetch('catalogo.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const result = await response.json();
-
-            if(result.success) {
-                // En lugar de inyectar código (que puede fallar si la tabla estaba vacía), recargamos para ver los datos frescos de SQL
-                alert(result.message);
-                window.location.reload();
-            } else {
-                alert("Error: " + result.message);
+            // --- LÓGICA DE ROLES EN LA VISTA ---
+            const rolUsuario = localStorage.getItem('usuario_rol') || 'Administrador';
+            if (rolUsuario === 'Operador') {
+                const elementosAdmin = document.querySelectorAll('.admin-only');
+                elementosAdmin.forEach(el => el.style.display = 'none');
             }
-        });
 
-        // --- 2. ABRIR MODALES PARA EDITAR/ELIMINAR ---
-        document.getElementById('listaCatalogos').addEventListener('click', function(e) {
-            const btnEditar = e.target.closest('.btn-editar');
-            const btnEliminar = e.target.closest('.btn-eliminar');
+            document.getElementById('btn-cerrar-sesion').addEventListener('click', (e) => {
+                e.preventDefault();
+                localStorage.clear();
+                window.location.href = '../cnfg/logout.php';
+            });
 
-            if (btnEditar) {
-                filaActual = btnEditar.closest('tr');
+            const modalAgregar = new bootstrap.Modal(document.getElementById('modalAgregar'));
+            const modalEditar = new bootstrap.Modal(document.getElementById('modalEditar'));
+            const modalAutorizarCat = new bootstrap.Modal(document.getElementById('modalAutorizarCat'));
+
+            // --- LÓGICA DE BÚSQUEDA Y FILTROS ---
+            const inputBuscador = document.getElementById('inputBuscador');
+            const filtroAbc = document.getElementById('filtro-abc');
+            const filtroEstatus = document.getElementById('filtro-estatus');
+            const filasTabla = document.querySelectorAll('#listaCatalogos tr');
+
+            function aplicarFiltros() {
+                const texto = inputBuscador.value.toLowerCase();
+                const abc = filtroAbc.value;
+                const estatus = filtroEstatus.value;
+
+                filasTabla.forEach(fila => {
+                    // Evitamos procesar la fila de "No hay productos" si existe
+                    if(!fila.hasAttribute('data-codigo')) return;
+
+                    const codigo = fila.dataset.codigo.toLowerCase();
+                    const nombre = fila.dataset.nombre.toLowerCase();
+                    const desc = fila.dataset.desc.toLowerCase();
+                    const filaAbc = fila.dataset.abc;
+                    const filaEstatus = fila.dataset.estatus;
+
+                    // Condiciones
+                    const cumpleTexto = codigo.includes(texto) || nombre.includes(texto) || desc.includes(texto);
+                    const cumpleAbc = (abc === 'ALL') || (filaAbc === abc);
+                    const cumpleEstatus = (estatus === 'ALL') || (filaEstatus === estatus);
+
+                    if (cumpleTexto && cumpleAbc && cumpleEstatus) {
+                        fila.style.display = ''; // Mostrar
+                    } else {
+                        fila.style.display = 'none'; // Ocultar
+                    }
+                });
+            }
+
+            inputBuscador.addEventListener('input', aplicarFiltros);
+            filtroAbc.addEventListener('change', aplicarFiltros);
+            filtroEstatus.addEventListener('change', aplicarFiltros);
+
+            // Variables para guardar la acción pendiente mientras se autoriza
+            let prodPendiente = null;
+            let estatusPendiente = null;
+
+            // --- AGREGAR PRODUCTO ---
+            document.getElementById('formNuevoProducto').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const payload = {
+                    accion: 'agregar',
+                    codigo: document.getElementById('add-codigo').value,
+                    nombre: document.getElementById('add-nombre').value,
+                    descripcion: document.getElementById('add-descripcion').value,
+                    abc: document.getElementById('add-abc').value,
+                    min: document.getElementById('add-min').value,
+                    max: document.getElementById('add-max').value
+                };
+
+                const response = await fetch('catalogo.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+
+                if(result.success) {
+                    alert(result.message);
+                    window.location.reload();
+                } else {
+                    alert("Error: " + result.message);
+                }
+            });
+
+            // --- DELEGACIÓN DE EVENTOS EN LA TABLA ---
+            document.getElementById('listaCatalogos').addEventListener('click', async function(e) {
                 
-                document.getElementById('edit-codigo-original').value = filaActual.dataset.codigo;
-                document.getElementById('edit-codigo').value = filaActual.dataset.codigo;
-                document.getElementById('edit-nombre').value = filaActual.dataset.nombre;
-                document.getElementById('edit-descripcion').value = filaActual.dataset.desc;
-                document.getElementById('edit-abc').value = filaActual.dataset.abc;
-                document.getElementById('edit-min').value = filaActual.dataset.min;
-                document.getElementById('edit-max').value = filaActual.dataset.max;
+                // Editar Producto
+                const btnEditar = e.target.closest('.btn-editar');
+                if (btnEditar) {
+                    const filaActual = btnEditar.closest('tr');
+                    document.getElementById('edit-codigo-original').value = filaActual.dataset.codigo;
+                    document.getElementById('edit-codigo').value = filaActual.dataset.codigo;
+                    document.getElementById('edit-nombre').value = filaActual.dataset.nombre;
+                    document.getElementById('edit-descripcion').value = filaActual.dataset.desc;
+                    document.getElementById('edit-abc').value = filaActual.dataset.abc;
+                    document.getElementById('edit-min').value = filaActual.dataset.min;
+                    document.getElementById('edit-max').value = filaActual.dataset.max;
+                    
+                    modalEditar.show();
+                }
+
+                // Cambiar Estatus (Activar/Desactivar)
+                const btnEstatus = e.target.closest('.btn-estatus');
+                if (btnEstatus) {
+                    const filaActual = btnEstatus.closest('tr');
+                    const codigo = filaActual.dataset.codigo;
+                    const nuevoEstatus = btnEstatus.dataset.accion;
+                    
+                    const accionTexto = nuevoEstatus == '1' ? 'REACTIVAR' : 'DAR DE BAJA';
+                    if(!confirm(`¿Estás seguro de que deseas ${accionTexto} este producto?`)) return;
+
+                    if (rolUsuario === 'Operador') {
+                        prodPendiente = codigo;
+                        estatusPendiente = nuevoEstatus;
+                        document.getElementById('adminPassCat').value = '';
+                        modalAutorizarCat.show();
+                    } else {
+                        ejecutarCambioEstatus(codigo, nuevoEstatus);
+                    }
+                }
+            });
+
+            // --- BOTÓN DEL MODAL DE AUTORIZACIÓN ---
+            document.getElementById('btnAutorizarCat').addEventListener('click', async () => {
+                const password = document.getElementById('adminPassCat').value;
+                if(password === '') {
+                    alert('Debe ingresar la contraseña de administrador');
+                    return;
+                }
                 
-                modalEditar.show();
-            }
+                try {
+                    const response = await fetch('catalogo.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ accion: 'autorizar_admin', password: password })
+                    });
+                    const result = await response.json();
 
-            if (btnEliminar) {
-                filaActual = btnEliminar.closest('tr');
-                document.getElementById('delete-codigo').value = filaActual.dataset.codigo;
-                document.getElementById('txt-eliminar-nombre').innerText = `El producto "${filaActual.dataset.nombre}" pasará a inactivo.`;
-                modalEliminar.show();
-            }
-        });
-
-        // --- 3. GUARDAR EDICIÓN ---
-        document.getElementById('formEditarProducto').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            const payload = {
-                accion: 'editar',
-                codigo_original: document.getElementById('edit-codigo-original').value,
-                codigo: document.getElementById('edit-codigo').value,
-                nombre: document.getElementById('edit-nombre').value,
-                descripcion: document.getElementById('edit-descripcion').value,
-                abc: document.getElementById('edit-abc').value,
-                min: document.getElementById('edit-min').value,
-                max: document.getElementById('edit-max').value
-            };
-
-            const response = await fetch('catalogo.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                    if (result.success) {
+                        modalAutorizarCat.hide();
+                        ejecutarCambioEstatus(prodPendiente, estatusPendiente);
+                    } else {
+                        alert(result.message);
+                    }
+                } catch (error) {
+                    alert('Error al verificar contraseña.');
+                }
             });
-            const result = await response.json();
 
-            if(result.success) {
-                alert(result.message);
-                window.location.reload();
-            } else {
-                alert("Error: " + result.message);
+            // --- FUNCIÓN FINAL PARA CAMBIAR EL ESTATUS EN BD ---
+            async function ejecutarCambioEstatus(codigo, estatus) {
+                const payload = { accion: 'cambiar_estatus', codigo: codigo, estatus: estatus };
+                const response = await fetch('catalogo.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+
+                if(result.success) {
+                    window.location.reload();
+                } else {
+                    alert("Error: " + result.message);
+                }
             }
-        });
 
-        // --- 4. CONFIRMAR BAJA ---
-        document.getElementById('btnConfirmarEliminar').addEventListener('click', async function() {
-            const payload = {
-                accion: 'eliminar',
-                codigo: document.getElementById('delete-codigo').value
-            };
+            // --- GUARDAR EDICIÓN ---
+            document.getElementById('formEditarProducto').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const payload = {
+                    accion: 'editar',
+                    codigo_original: document.getElementById('edit-codigo-original').value,
+                    codigo: document.getElementById('edit-codigo').value,
+                    nombre: document.getElementById('edit-nombre').value,
+                    descripcion: document.getElementById('edit-descripcion').value,
+                    abc: document.getElementById('edit-abc').value,
+                    min: document.getElementById('edit-min').value,
+                    max: document.getElementById('edit-max').value
+                };
 
-            const response = await fetch('catalogo.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                const response = await fetch('catalogo.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+
+                if(result.success) {
+                    alert(result.message);
+                    window.location.reload();
+                } else {
+                    alert("Error: " + result.message);
+                }
             });
-            const result = await response.json();
-
-            if(result.success) {
-                filaActual.remove(); // Desaparece visualmente de la tabla
-                modalEliminar.hide();
-                alert(result.message);
-            } else {
-                alert("Error: " + result.message);
-            }
         });
     </script>
 </body>
