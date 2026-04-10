@@ -57,6 +57,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $idProducto = $data['idProducto'];
             $cantidad = (int)$data['cantidad'];
             $tipo = $data['tipo']; // 'entrada' o 'salida'
+
+            // --- NUEVO CANDADO DE BACKEND: EVITAR NEGATIVOS ---
+            if ($tipo === 'salida') {
+                $stmtCheck = $conn->prepare("SELECT STOCKACTUAL FROM PRODUCTOS WHERE IDPRODUCTO = :id");
+                $stmtCheck->execute([':id' => $idProducto]);
+                $stockEnBaseDeDatos = $stmtCheck->fetchColumn();
+                
+                if ($cantidad > $stockEnBaseDeDatos) {
+                    echo json_encode(['success' => false, 'message' => "Operación cancelada: Intento de retirar más unidades de las que existen en físico."]);
+                    exit;
+                }
+            }
             
             // --- CORRECCIÓN 1: INICIAMOS TRANSACCIÓN DESDE AQUÍ ARRIBA ---
             $conn->beginTransaction();
@@ -163,17 +175,24 @@ try {
         </div>
         
         <ul class="nav flex-column mb-auto">
-            <li class="nav-item <?= $rolUsuarioActual === 'Operador' ? 'd-none' : '' ?>">
+            <li class="nav-item">
+                <a href="../panelAdmin/panelAdmin.php" class="nav-link"><i class="fas fa-home me-3"></i> Inicio</a>
+            </li>
+            <li class="nav-item">
+                <a href="../perfil/perfil.php" class="nav-link"><i class="fas fa-user-circle me-3"></i> Mi Perfil</a>
+            </li>
+            <li class="nav-item">
                 <a href="../catalogo/catalogo.php" class="nav-link"><i class="fas fa-book me-3"></i> Catálogo</a>
             </li>
             <li class="nav-item">
-                <a href="../movimientos/movimientos.php" class="nav-link active"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
+                <a href="../movimientos/movimientos.php" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
             </li>
-            <li class="nav-item <?= $rolUsuarioActual === 'Operador' ? 'd-none' : '' ?>">
-                <a href="../reportes/reportes.html" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
+            
+            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+                <a href="../reportes/reportes.php" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
             </li>
-            <li class="nav-item <?= $rolUsuarioActual === 'Operador' ? 'd-none' : '' ?>">
-                <a href="../usuarios/usuarios.html" class="nav-link"><i class="fas fa-user-cog me-3"></i> Usuarios</a>
+            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+                <a href="../usuarios/usuarios.php" class="nav-link"><i class="fas fa-user-cog me-3"></i> Usuarios</a>
             </li>
         </ul>
         
@@ -336,7 +355,8 @@ try {
             document.getElementById('btn-cerrar-sesion').addEventListener('click', (e) => {
                 e.preventDefault();
                 localStorage.clear();
-                window.location.href = '../login/logout.php';
+                // Ruta correcta hacia tu archivo en la carpeta cnfg
+                window.location.href = '../cnfg/logout.php';
             });
 
             // --- VARIABLES GLOBALES ---
@@ -417,6 +437,13 @@ try {
                 let max = parseInt(productoSeleccionado.STOCKMAXIMO) || 0;
                 let min = parseInt(productoSeleccionado.STOCKMINIMO) || 0;
                 let stockResultante = tipo === 'entrada' ? stockActual + cantidad : stockActual - cantidad;
+
+                // --- NUEVO CANDADO: EVITAR STOCK NEGATIVO ---
+                if (tipo === 'salida' && stockResultante < 0) {
+                    document.getElementById('textoAlerta').innerText = `Stock insuficiente. Solo tienes ${stockActual} unidades disponibles en físico.`;
+                    modalAlerta.show();
+                    return; // Detenemos el proceso aquí mismo
+                }
 
                 if (tipo === 'entrada' && stockResultante > max) {
                     document.getElementById('textoAlertaStock').innerText = `La entrada supera el stock máximo permitido (${max}).`;

@@ -113,12 +113,7 @@
                         localStorage.setItem('usuario_rol', result.rol);
                         localStorage.setItem('usuario_folio', result.folio);
 
-                        // Redirigimos según el rol con las rutas corregidas
-                        if (result.rol === 'Administrador') {
-                            window.location.href = '../panelAdmin/panelAdmin.php'; 
-                        } else {
-                            window.location.href = '../movimientos/movimientos.php'; 
-                        }
+                        window.location.href = '../panelAdmin/panelAdmin.php';
                     } else {
                         // Mostrar error devuelto por la base de datos (contraseña incorrecta, etc.)
                         errorMsg.innerText = result.message;
