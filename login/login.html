@@ -24,45 +24,16 @@
                 <input type="password" id="login-pass" class="form-control" placeholder="••••••••" required>
                 <button type="submit" class="btn-login">LOGIN</button>
             </form>
-
-            <form id="registro-form">
-                <input type="text" id="reg-nombre" class="form-control" placeholder="Nombre Completo" required>
-                <input type="text" id="reg-folio" class="form-control" placeholder="Nuevo Folio (ADM-XXXX o OPR-XXXX)" required autocomplete="off">
-                <input type="password" id="reg-pass" class="form-control" placeholder="Crear Contraseña" required>
-                <button type="submit" class="btn-login" style="background-color: var(--azul-rey);">REGISTRARSE</button>
-            </form>
-
-            <span class="toggle-link" id="toggle-btn">¿No tienes cuenta? Regístrate aquí</span>
         </div>
     </div>
 
 <script>
         document.addEventListener('DOMContentLoaded', () => {
             const loginForm = document.getElementById('login-form');
-            const registroForm = document.getElementById('registro-form');
             const formTitle = document.getElementById('form-title');
-            const toggleBtn = document.getElementById('toggle-btn');
             const errorMsg = document.getElementById('error-msg');
             
-            let isLogin = true;
-
-            // Alternar entre Login y Registro
-            toggleBtn.addEventListener('click', () => {
-                isLogin = !isLogin;
-                errorMsg.classList.add('d-none'); // Limpiar errores
-                
-                if(isLogin) {
-                    formTitle.innerText = 'Login';
-                    loginForm.style.display = 'block';
-                    registroForm.style.display = 'none';
-                    toggleBtn.innerText = '¿No tienes cuenta? Regístrate aquí';
-                } else {
-                    formTitle.innerText = 'Registro';
-                    loginForm.style.display = 'none';
-                    registroForm.style.display = 'block';
-                    toggleBtn.innerText = '¿Ya tienes cuenta? Inicia sesión';
-                }
-            });
+           
 
             // Función para validar la nomenclatura del folio
             function validarFolio(folio) {
@@ -113,7 +84,12 @@
                         localStorage.setItem('usuario_rol', result.rol);
                         localStorage.setItem('usuario_folio', result.folio);
 
-                        window.location.href = '../panelAdmin/panelAdmin.php';
+                        // Redirigimos según el rol con las rutas corregidas
+                        if (result.rol === 'Administrador') {
+                            window.location.href = '../panelAdmin/panelAdmin.php'; 
+                        } else {
+                            window.location.href = '../movimientos/movimientos.php'; 
+                        }
                     } else {
                         // Mostrar error devuelto por la base de datos (contraseña incorrecta, etc.)
                         errorMsg.innerText = result.message;
@@ -126,21 +102,7 @@
                 }
             });
 
-            // Manejar envío de Registro (Para futura implementación con backend)
-            registroForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const folio = document.getElementById('reg-folio').value;
-                const folioValidado = validarFolio(folio);
-
-                if (!folioValidado) {
-                    errorMsg.innerText = "El folio debe ser ADM-XXXX u OPR-XXXX.";
-                    errorMsg.classList.remove('d-none');
-                    return;
-                }
-
-                errorMsg.classList.add('d-none');
-                alert(`Petición de registro enviada a la base de datos para: ${folioValidado} (Falta conectar backend de registro)`);
-            });
+          
         });
     </script>
 </body>
