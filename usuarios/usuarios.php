@@ -98,29 +98,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($e->getCode() == '23000' && $accion === 'eliminar_completo') {
             $idTarget = $data['idUsuario'];
             
-            // 1. Obtenemos los datos actuales del usuario
-            $stmtGet = $conn->prepare("SELECT ACCESO FROM USUARIOS WHERE IDUSUARIO = :id");
-            $stmtGet->execute([':id' => $idTarget]);
-            $user = $stmtGet->fetch(PDO::FETCH_ASSOC);
-            
-            if ($user) {
-                $folioViejo = $user['ACCESO']; // Ej: OPR-0015
+            try {
+                // 1. Obtenemos los datos actuales del usuario
+                $stmtGet = $conn->prepare("SELECT ACCESO FROM USUARIOS WHERE IDUSUARIO = :id");
+                $stmtGet->execute([':id' => $idTarget]);
+                $user = $stmtGet->fetch(PDO::FETCH_ASSOC);
                 
-                // 2. Creamos un folio "basura" único para liberar el original (Ej: DEL-5-0015)
-                $folioBaja = 'DEL-' . $idTarget . '-' . substr($folioViejo, 4);
-                
-                // 3. Archivamos al usuario (Soft-Delete)
-                // Le cambiamos el folio, lo desactivamos y le agregamos una etiqueta a su nombre
-                $stmtSoftDelete = $conn->prepare("UPDATE USUARIOS SET ACCESO = :nuevoFolio, ESTATUS = 0, NOMBRE = CONCAT(NOMBRE, ' (Archivado)') WHERE IDUSUARIO = :id");
-                $stmtSoftDelete->execute([
-                    ':nuevoFolio' => $folioBaja,
-                    ':id' => $idTarget
-                ]);
-                
-                echo json_encode([
-                    'success' => true, 
-                    'message' => "El usuario tenía historial y se archivó de forma segura. El folio $folioViejo ya fue liberado y puedes volver a crearlo."
-                ]);
+                if ($user) {
+                    $folioViejo = $user['ACCESO']; 
+                    
+                    // 2. Creamos un folio "basura" que mida EXACTAMENTE 8 caracteres (Ej: DEL-0015)
+                    $folioBaja = 'DEL-' . str_pad($idTarget, 4, '0', STR_PAD_LEFT);
+                    
+                    // 3. Archivamos al usuario (Soft-Delete)
+                    // Usamos SUBSTRING en SQL Server para evitar desbordar la columna NOMBRE
+                    $stmtSoftDelete = $conn->prepare("UPDATE USUARIOS SET ACCESO = :nuevoFolio, ESTATUS = 0, NOMBRE = CONCAT(SUBSTRING(NOMBRE, 1, 40), ' (Archivado)') WHERE IDUSUARIO = :id");
+                    $stmtSoftDelete->execute([
+                        ':nuevoFolio' => $folioBaja,
+                        ':id' => $idTarget
+                    ]);
+                    
+                    echo json_encode([
+                        'success' => true, 
+                        'message' => "El usuario tenía historial y se archivó de forma segura. El folio $folioViejo ya fue liberado."
+                    ]);
+                }
+            } catch(PDOException $ex) {
+                // Si la actualización falla (ej. por límites de columna), devolvemos un JSON válido para que JS lo pueda leer
+                echo json_encode(['success' => false, 'message' => 'Error interno al intentar archivar: ' . $ex->getMessage()]);
             }
             exit;
         }
@@ -130,7 +135,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 }
-
 // =======================================================================
 // 3. CARGAR LISTA DE USUARIOS (GET)
 // =======================================================================
@@ -138,7 +142,14 @@ $listaUsuarios = [];
 try {
     $db = new ConexionBD();
     $conn = $db->getConnection();
-    $stmt = $conn->query("SELECT IDUSUARIO, ACCESO, NOMBRE, ROL, ESTATUS FROM USUARIOS ORDER BY ESTATUS DESC, ROL ASC, NOMBRE ASC");
+    // NUEVA CONSULTA: Filtramos a los usuarios cuyo folio empieza con 'DEL-'
+    $query = "
+        SELECT IDUSUARIO, ACCESO, NOMBRE, ROL, ESTATUS 
+        FROM USUARIOS 
+        WHERE ACCESO NOT LIKE 'DEL-%' 
+        ORDER BY ESTATUS DESC, ROL ASC, NOMBRE ASC
+    ";
+    $stmt = $conn->query($query);
     $listaUsuarios = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch(PDOException $e) {
     $error_bd = "No se pudieron cargar los usuarios: " . $e->getMessage();

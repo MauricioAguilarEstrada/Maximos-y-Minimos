@@ -160,7 +160,7 @@ try {
     <main id="main-content">
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2 class="h3 mb-0">Catálogo de Productos</h2>
-            <button class="btn btn-primary admin-only" data-bs-toggle="modal" data-bs-target="#modalAgregar">
+            <button class="btn btn-primary" id="btnAgregarPrincipal">
                 <i class="fas fa-plus me-2"></i> Agregar Producto
             </button>
         </div>
@@ -425,7 +425,7 @@ try {
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body text-center p-4">
-                    <h5 class="mb-4">Se requiere permiso de Administrador para modificar el estatus de este producto.</h5>
+                    <h5 class="mb-4" id="txt-motivo-auth">Se requiere permiso de un Administrador para continuar.</h5>
                     <div class="form-floating mb-3">
                         <input type="password" class="form-control" id="adminPassCat" placeholder="Contraseña">
                         <label for="adminPassCat">Contraseña de Administrador</label>
@@ -504,11 +504,24 @@ try {
             filtroAbc.addEventListener('change', aplicarFiltros);
             filtroEstatus.addEventListener('change', aplicarFiltros);
 
-            // Variables para guardar la acción pendiente mientras se autoriza
+           // Variables para guardar la acción pendiente mientras se autoriza
+            let tipoAccionPendiente = null; // Guardará 'agregar' o 'estatus'
             let prodPendiente = null;
             let estatusPendiente = null;
 
-            // --- AGREGAR PRODUCTO ---
+            // --- BOTON AGREGAR PRODUCTO (NUEVO CONTROL) ---
+            document.getElementById('btnAgregarPrincipal').addEventListener('click', () => {
+                if (rolUsuario === 'Operador') {
+                    tipoAccionPendiente = 'agregar';
+                    document.getElementById('txt-motivo-auth').innerText = 'Se requiere permiso de Administrador para dar de alta un producto nuevo.';
+                    document.getElementById('adminPassCat').value = '';
+                    modalAutorizarCat.show();
+                } else {
+                    modalAgregar.show();
+                }
+            });
+
+            // --- AGREGAR PRODUCTO (SUBMIT) ---
             document.getElementById('formNuevoProducto').addEventListener('submit', async function(e) {
                 e.preventDefault();
                 const payload = {
@@ -565,8 +578,10 @@ try {
                     if(!confirm(`¿Estás seguro de que deseas ${accionTexto} este producto?`)) return;
 
                     if (rolUsuario === 'Operador') {
+                        tipoAccionPendiente = 'estatus'; // Indicamos que la acción es cambiar estatus
                         prodPendiente = codigo;
                         estatusPendiente = nuevoEstatus;
+                        document.getElementById('txt-motivo-auth').innerText = 'Se requiere permiso de Administrador para modificar el estatus de este producto.';
                         document.getElementById('adminPassCat').value = '';
                         modalAutorizarCat.show();
                     } else {
@@ -593,7 +608,13 @@ try {
 
                     if (result.success) {
                         modalAutorizarCat.hide();
-                        ejecutarCambioEstatus(prodPendiente, estatusPendiente);
+                        
+                        // Validamos qué estábamos intentando hacer antes de pedir la contraseña
+                        if (tipoAccionPendiente === 'estatus') {
+                            ejecutarCambioEstatus(prodPendiente, estatusPendiente);
+                        } else if (tipoAccionPendiente === 'agregar') {
+                            modalAgregar.show(); // Abrimos el modal de nuevo producto
+                        }
                     } else {
                         alert(result.message);
                     }
