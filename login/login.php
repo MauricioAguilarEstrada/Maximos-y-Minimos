@@ -1,59 +1,65 @@
 <?php
 session_start();
-require_once '../cnfg/conexionBD.php';
+header('Content-Type: application/json'); 
 
-header('Content-Type: application/json');
-//Entrada de datos (se reciben del JS)
-$data = json_decode(file_get_contents("php://input"), true);
-$folio = $data['folio'] ?? '';
-$password = $data['password'] ?? '';
+$host = 'ep-royal-fire-b4e0qwit-pooler.c-6.us-east-2.aws.neon.tech';
+$dbname = 'neondb';
+$endpoint_id = 'ep-royal-fire-b4e0qwit';
 
-if (empty($folio) || empty($password)) {
-    echo json_encode(['success' => false, 'message' => 'Folio y contraseña son obligatorios.']);
-    exit;
-}
-
-try {
-    $db = new ConexionBD();
-    $conn = $db->getConnection();
-
-    $query = "SELECT IDUSUARIO, ACCESO, NOMBRE, PASSWRD, ROL, ESTATUS FROM USUARIOS WHERE ACCESO = :folio";
-    $stmt = $conn->prepare($query);
-    $stmt->bindParam(':folio', $folio);
-    $stmt->execute();
-
-    // LA SOLUCIÓN: Intentamos extraer los datos directamente en lugar de contarlos
-    $usuario = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if ($usuario) { // Si $usuario tiene datos, significa que sí lo encontró
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    // 1. Leer el JSON enviado por fetch() en lugar de usar $_POST
+    $json = file_get_contents('php://input');
+    $data = json_decode($json, true);
+    
+    // JS envía 'folio' y 'password'
+    $usuario_form = trim($data['folio'] ?? ''); 
+    $password_form = trim($data['password'] ?? ''); 
+    
+    try {
+        $dsn = "pgsql:host=$host;port=5432;dbname=$dbname;sslmode=require;options='endpoint=$endpoint_id'";
+        $conexion = new PDO($dsn, $usuario_form, $password_form, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ]);
         
-        if ($usuario['ESTATUS'] == 0) {
-            echo json_encode(['success' => false, 'message' => 'Este usuario está inactivo.']);
+        $stmt = $conexion->prepare("SELECT nombre, estatus FROM public.usuarios WHERE acceso = :acceso");
+        $stmt->execute([':acceso' => $usuario_form]);
+        $datosUsuario = $stmt->fetch();
+        
+        if ($datosUsuario && $datosUsuario['estatus'] == true) {
+            $_SESSION['usuario_bd'] = $usuario_form;
+            $_SESSION['password_bd'] = $password_form;
+            $_SESSION['nombre_usuario'] = $datosUsuario['nombre'];
+            
+            // 3. Deducir el rol usando el prefijo de la nomenclatura para la redirección de JS
+            $rol_detectado = (strpos($usuario_form, 'ADM') === 0) ? 'Administrador' : 'Operador';
+            
+            // Devolver las variables exactas que espera tu JavaScript
+            echo json_encode([
+                "success" => true, 
+                "message" => "Autenticado",
+                "rol" => $rol_detectado,
+                "folio" => $usuario_form
+            ]);
+            exit;
+        } else {
+            // 2. Usar "message" en lugar de "mensaje"
+            echo json_encode([
+                "success" => false, 
+                "message" => "Acceso denegado: El usuario está inactivo."
+            ]);
             exit;
         }
-
-        // Verificamos contraseña exacta
-        if ($password === $usuario['PASSWRD']) { 
-            $_SESSION['usuario_id'] = $usuario['IDUSUARIO'];
-            $_SESSION['usuario_folio'] = $usuario['ACCESO'];
-            $_SESSION['usuario_rol'] = $usuario['ROL'];
-            $_SESSION['usuario_nombre'] = $usuario['NOMBRE'];
-
-            echo json_encode([
-                'success' => true, 
-                'message' => 'Acceso concedido',
-                'rol' => $usuario['ROL'],
-                'folio' => $usuario['ACCESO']
-            ]);
-        } else {
-            echo json_encode(['success' => false, 'message' => 'Contraseña incorrecta.']);
-        }
-    } else {
-        // Si $usuario está vacío (false), entonces sí es verdad que no existe
-        echo json_encode(['success' => false, 'message' => 'El folio ingresado no existe.']);
+        
+    } catch (PDOException $e) {
+        echo json_encode([
+            "success" => false, 
+            "message" => "Usuario o contraseña incorrectos."
+        ]);
+        exit;
     }
-
-} catch(Exception $e) {
-    echo json_encode(['success' => false, 'message' => 'Error en el servidor: ' . $e->getMessage()]);
+} else {
+    echo json_encode(["success" => false, "message" => "Método no permitido."]);
+    exit;
 }
 ?>
