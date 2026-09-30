@@ -52,7 +52,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     } catch (PDOException $e) {
         echo json_encode([
             "success" => false, 
-            "message" => "Usuario o contraseña incorrectos."
+            "message" => "Error técnico: " . $e->getMessage()
         ]);
         exit;
     }
