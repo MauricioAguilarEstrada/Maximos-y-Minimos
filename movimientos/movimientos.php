@@ -1,32 +1,37 @@
 <?php
 session_start();
-require_once '../cnfg/conexionBD.php';
 
-if (!isset($_SESSION['usuario_id'])) {
+if (!isset($_SESSION['usuario_bd'])) {
     header("Location: ../login/login.html");
     exit;
 }
 
-$idUsuarioActual = $_SESSION['usuario_id'];
-$rolUsuarioActual = $_SESSION['usuario_rol'];
-$folioUsuarioActual = $_SESSION['usuario_folio'];
+$idUsuarioActual =$_SESSION['usuario_bd']; // Ej: OPR-0002
+$nombreUsuarioActual =$_SESSION['nombre_usuario'] ?? 'Usuario';
+$rolUsuarioActual = (strpos($idUsuarioActual, 'ADM') === 0) ? 'Administrador' : 'Operador';
+
+// Parámetros Neon
+$host = 'ep-royal-fire-b4e0qwit-pooler.c-6.us-east-2.aws.neon.tech';
+$dbname = 'neondb';$endpoint_id = 'ep-royal-fire-b4e0qwit';
+$dsn = "pgsql:host=$host;port=5432;dbname=$dbname;sslmode=require;options='endpoint=$endpoint_id'";
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
     $data = json_decode(file_get_contents("php://input"), true);
-    $accion = $data['accion'] ?? '';
+    $accion =$data['accion'] ?? '';
 
     try {
-        $db = new ConexionBD();
-        $conn = $db->getConnection();
+        // Conexión principal con el usuario activo
+        $conn = new PDO($dsn, $_SESSION['usuario_bd'],$_SESSION['password_bd'], [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ]);
 
-        // 1. BUSCAR PRODUCTO POR CÓDIGO DE BARRAS
+        // 1. BUSCAR PRODUCTO
         if ($accion === 'buscar_producto') {
-            $stmt = $conn->prepare("SELECT IDPRODUCTO, NOMBRE, STOCKACTUAL, STOCKMINIMO, STOCKMAXIMO FROM PRODUCTOS WHERE CODIGODEBARRAS = :codigo AND ESTATUS = 1");
-            $stmt->execute([':codigo' => $data['codigo']]);
-            
-            // LA SOLUCIÓN: Extraer directamente en lugar de contar
-            $producto = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stmt =$conn->prepare("SELECT idproducto, nombre, stockactual, stockminimo, stockmaximo FROM public.productos WHERE codigodebarras = :codigo AND estatus = true");
+            $stmt->execute([':codigo' =>$data['codigo']]);
+            $producto =$stmt->fetch();
             
             if ($producto) {
                 echo json_encode(['success' => true, 'producto' => $producto]);
@@ -36,96 +41,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
-        // 2. AUTORIZAR CON CONTRASEÑA DE ADMINISTRADOR
+        // 2. AUTORIZAR CON CREDENCIALES DE ADMINISTRADOR DIRECTO EN POSTGRES
         if ($accion === 'autorizar_admin') {
-            $stmt = $conn->prepare("SELECT IDUSUARIO FROM USUARIOS WHERE ROL = 'Administrador' AND PASSWRD = :pass AND ESTATUS = 1");
-            $stmt->execute([':pass' => $data['password']]);
+            $adminUser =$data['adminUser'] ?? '';
+            $adminPass =$data['password'] ?? '';
             
-            // LA SOLUCIÓN: Extraer directamente en lugar de contar
-            $admin = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            if ($admin) {
+            if(strpos($adminUser, 'ADM') !== 0) {
+                echo json_encode(['success' => false, 'message' => 'El usuario proporcionado no tiene prefijo de Administrador (ADM-XXXX).']);
+                exit;
+            }
+
+            try {
+                // Intentamos conectar a Postgres con las credenciales dadas en el modal
+                $adminConn = new PDO($dsn, $adminUser,$adminPass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
                 echo json_encode(['success' => true]);
-            } else {
-                echo json_encode(['success' => false, 'message' => 'Contraseña incorrecta o el usuario no es Administrador.']);
+            } catch (PDOException $e) {
+                echo json_encode(['success' => false, 'message' => 'Credenciales de administrador incorrectas.']);
             }
             exit;
         }
 
-        // 3. REGISTRAR EL MOVIMIENTO Y ACTUALIZAR STOCK
+        // 3. REGISTRAR EL MOVIMIENTO (Llama al Procedure y el Trigger actualiza el stock)
         if ($accion === 'registrar_movimiento') {
-            $idProducto = $data['idProducto'];
+            $idProducto =$data['idProducto'];
             $cantidad = (int)$data['cantidad'];
-            $tipo = $data['tipo']; // 'entrada' o 'salida'
+            $tipo =$data['tipo']; // 'entrada' o 'salida'
 
-            // --- NUEVO CANDADO DE BACKEND: EVITAR NEGATIVOS ---
-            if ($tipo === 'salida') {
-                $stmtCheck = $conn->prepare("SELECT STOCKACTUAL FROM PRODUCTOS WHERE IDPRODUCTO = :id");
-                $stmtCheck->execute([':id' => $idProducto]);
-                $stockEnBaseDeDatos = $stmtCheck->fetchColumn();
-                
-                if ($cantidad > $stockEnBaseDeDatos) {
-                    echo json_encode(['success' => false, 'message' => "Operación cancelada: Intento de retirar más unidades de las que existen en físico."]);
-                    exit;
-                }
-            }
-            
-            // --- CORRECCIÓN 1: INICIAMOS TRANSACCIÓN DESDE AQUÍ ARRIBA ---
-            $conn->beginTransaction();
-
-            // Verificamos o creamos el tipo de movimiento en la tabla TIPODEMOVIMIENTO
             $motivoStr = $tipo === 'entrada' ? 'Entrada' : 'Salida';
-            $stmtTipo = $conn->prepare("SELECT IDTIPODEMOVIMIENTO FROM TIPODEMOVIMIENTO WHERE MOTIVO = :motivo");
-            $stmtTipo->execute([':motivo' => $motivoStr]);
-            
-            $tipoMov = $stmtTipo->fetch(PDO::FETCH_ASSOC);
-            
-            if ($tipoMov) {
-                $idTipoMovimiento = $tipoMov['IDTIPODEMOVIMIENTO'];
-            } else {
-                // Si no existe, lo insertamos
-                $stmtInsertTipo = $conn->prepare("INSERT INTO TIPODEMOVIMIENTO (MOTIVO) VALUES (:motivo)");
-                $stmtInsertTipo->execute([':motivo' => $motivoStr]);
-                $idTipoMovimiento = $conn->lastInsertId();
-            }
+$stmtTipo = $conn->prepare("SELECT idtipodemovimiento FROM public.tipodemovimiento WHERE motivo = :motivo");
+$stmtTipo->execute([':motivo' => $motivoStr]);
+$idTipoMovimiento = $stmtTipo->fetchColumn();
 
-            // A) Insertar en MOVIMIENTOS
-            $stmtMov = $conn->prepare("INSERT INTO MOVIMIENTOS (IDUSUARIO, IDTIPODEMOVIMIENTO, NOTAS) VALUES (:idUsuario, :idTipo, :notas)");
+// Si no existe, lo insertamos al vuelo simulando tu lógica original
+if (!$idTipoMovimiento) {
+    $stmtInsertTipo = $conn->prepare("INSERT INTO public.tipodemovimiento (motivo) VALUES (:motivo) RETURNING idtipodemovimiento");
+    $stmtInsertTipo->execute([':motivo' => $motivoStr]);
+    $idTipoMovimiento = $stmtInsertTipo->fetchColumn();
+}
+
+            // Construir JSON para el detalle
+            $json_detalles = json_encode([
+                ['idproducto' => $idProducto, 'cantidad' =>$cantidad]
+            ]);
+
+            // Invocar el procedimiento almacenado
+            $stmtMov =$conn->prepare("CALL public.registrar_movimiento_completo(:usuario, :tipo, :notas, :detalles)");
             $stmtMov->execute([
-                ':idUsuario' => $idUsuarioActual,
-                ':idTipo' => $idTipoMovimiento,
-                ':notas' => "Registro desde módulo de escáner"
+                ':usuario'  => $idUsuarioActual,
+                ':tipo'     => $idTipoMovimiento,
+                ':notas'    => "Registro desde módulo de escáner",
+                ':detalles' => $json_detalles
             ]);
-            $idMovimiento = $conn->lastInsertId();
-
-            // B) Insertar en DETALLESMOVIMIENTOS
-            $stmtDet = $conn->prepare("INSERT INTO DETALLESMOVIMIENTOS (CANTIDAD, IDPRODUCTO, IDMOVIMIENTO) VALUES (:cantidad, :idProducto, :idMovimiento)");
-            $stmtDet->execute([
-                ':cantidad' => $cantidad,
-                ':idProducto' => $idProducto,
-                ':idMovimiento' => $idMovimiento
-            ]);
-
-            // C) Actualizar STOCKACTUAL en PRODUCTOS
-            $operador = $tipo === 'entrada' ? '+' : '-';
-            $stmtUpd = $conn->prepare("UPDATE PRODUCTOS SET STOCKACTUAL = STOCKACTUAL {$operador} :cantidad, FECHAMODIFICACION = GETDATE() WHERE IDPRODUCTO = :idProducto");
-            $stmtUpd->execute([
-                ':cantidad' => $cantidad,
-                ':idProducto' => $idProducto
-            ]);
-
-            $conn->commit(); 
             
             echo json_encode(['success' => true, 'message' => 'Movimiento registrado con éxito.']);
             exit;
         }
 
     } catch(PDOException $e) {
-        // --- CORRECCIÓN 2: VERIFICAR SI HAY TRANSACCIÓN ANTES DE DESHACER ---
-        if(isset($conn) && $conn->inTransaction()) { 
-            $conn->rollBack(); 
-        }
-        // Ahora sí, enviamos el error REAL de SQL Server al navegador
         echo json_encode(['success' => false, 'message' => 'Error de BD: ' . $e->getMessage()]);
         exit;
     }
@@ -136,25 +108,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // =======================================================================
 $ultimosMovimientos = [];
 try {
-    $db = new ConexionBD();
-    $conn = $db->getConnection();
-    // Consulta con JOIN para traer información completa
+    $connGET = new PDO($dsn, $_SESSION['usuario_bd'],$_SESSION['password_bd'], [PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    // Consulta adaptada a la sintaxis de PostgreSQL
     $queryHistorial = "
-        SELECT TOP 10 
-            T.MOTIVO, P.NOMBRE as PRODUCTO, D.CANTIDAD, U.ACCESO as USUARIO,
-            FORMAT(M.FECHAHORA, 'dd/MM/yyyy HH:mm') AS FECHA_MOV
-        FROM MOVIMIENTOS M
-        INNER JOIN DETALLESMOVIMIENTOS D ON M.IDMOVIMIENTO = D.IDMOVIMIENTO
-        INNER JOIN PRODUCTOS P ON D.IDPRODUCTO = P.IDPRODUCTO
-        INNER JOIN TIPODEMOVIMIENTO T ON M.IDTIPODEMOVIMIENTO = T.IDTIPODEMOVIMIENTO
-        INNER JOIN USUARIOS U ON M.IDUSUARIO = U.IDUSUARIO
-        ORDER BY M.IDMOVIMIENTO DESC
+        SELECT 
+            T.motivo AS \"MOTIVO\", P.nombre AS \"PRODUCTO\", D.cantidad AS \"CANTIDAD\", U.acceso AS \"USUARIO\",
+            TO_CHAR(M.fechahora, 'DD/MM/YYYY HH24:MI') AS \"FECHA_MOV\"
+        FROM public.movimientos M
+        INNER JOIN public.detallesmovimientos D ON M.idmovimiento = D.idmovimiento
+        INNER JOIN public.productos P ON D.idproducto = P.idproducto
+        INNER JOIN public.tipodemovimiento T ON M.idtipodemovimiento = T.idtipodemovimiento
+        INNER JOIN public.usuarios U ON M.idusuario = U.idusuario
+        ORDER BY M.idmovimiento DESC
+        LIMIT 10
     ";
-    $stmtHist = $conn->query($queryHistorial);
-    $ultimosMovimientos = $stmtHist->fetchAll();
-} catch(PDOException $e) {
-    // Manejo de error silencioso para la vista
-}
+    $stmtHist = $connGET->query($queryHistorial);
+    $ultimosMovimientos =$stmtHist->fetchAll();
+} catch(PDOException $e) {}
 ?>
 
 <!DOCTYPE html>
@@ -172,7 +142,7 @@ try {
         <div class="brand-logo py-4 text-center mb-3">
             <i class="fas fa-boxes fa-2x mb-2"></i>
             <h5 class="mb-0 fw-bold">Gestión de Stock</h5>
-            <small class="text-white-50"><?= htmlspecialchars($rolUsuarioActual) ?> (<?= htmlspecialchars($folioUsuarioActual) ?>)</small>
+            <small class="text-white-50"><?= htmlspecialchars($rolUsuarioActual) ?> (<?= htmlspecialchars($idUsuarioActual) ?>)</small>
         </div>
         
         <ul class="nav flex-column mb-auto">
@@ -189,10 +159,10 @@ try {
                 <a href="../movimientos/movimientos.php" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
             </li>
             
-            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+            <li class="nav-item <?= ($rolUsuarioActual === 'Operador') ? 'd-none' : '' ?>">
                 <a href="../reportes/reportes.php" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
             </li>
-            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+            <li class="nav-item <?= ($rolUsuarioActual === 'Operador') ? 'd-none' : '' ?>">
                 <a href="../usuarios/usuarios.php" class="nav-link"><i class="fas fa-user-cog me-3"></i> Usuarios</a>
             </li>
         </ul>
@@ -287,14 +257,14 @@ try {
                                     <?php if(empty($ultimosMovimientos)): ?>
                                         <tr><td colspan="4" class="text-center py-4 text-muted">No hay movimientos recientes.</td></tr>
                                     <?php else: ?>
-                                        <?php foreach($ultimosMovimientos as $mov): 
-                                            $badge = $mov['MOTIVO'] === 'Entrada' ? 'bg-success' : 'bg-danger';
-                                            $signo = $mov['MOTIVO'] === 'Entrada' ? '+' : '-';
+                                        <?php foreach($ultimosMovimientos as$mov): 
+                                            $badge =$mov['MOTIVO'] === 'Entrada' ? 'bg-success' : 'bg-danger';
+                                            $signo =$mov['MOTIVO'] === 'Entrada' ? '+' : '-';
                                         ?>
                                         <tr>
                                             <td class="px-4"><span class="badge <?= $badge ?>"><?= $mov['MOTIVO'] ?></span></td>
                                             <td><?= htmlspecialchars($mov['PRODUCTO']) ?></td>
-                                            <td class="text-center fw-bold text-muted"><?= $signo . $mov['CANTIDAD'] ?></td>
+                                            <td class="text-center fw-bold text-muted"><?= $signo .$mov['CANTIDAD'] ?></td>
                                             <td class="text-center text-muted"><?= htmlspecialchars($mov['USUARIO']) ?></td>
                                             <td class="text-end pe-4 text-muted"><small><?= $mov['FECHA_MOV'] ?? 'N/D' ?></small></td>
                                         </tr>
@@ -318,11 +288,15 @@ try {
                 </div>
                 <div class="modal-body text-center p-4">
                     <h5 id="textoAlertaStock" class="mb-4">El movimiento supera los límites permitidos.</h5>
-                    <p class="text-muted">Se requiere contraseña de Administrador para forzar el movimiento.</p>
+                    <p class="text-muted">Se requiere credencial de Administrador para forzar el movimiento en la base de datos.</p>
                     
                     <div class="form-floating mb-3">
+                        <input type="text" class="form-control" id="adminUser" placeholder="Usuario (Ej. ADM-0001)">
+                        <label for="adminUser">Usuario Administrador</label>
+                    </div>
+                    <div class="form-floating mb-3">
                         <input type="password" class="form-control" id="adminPassword" placeholder="Contraseña">
-                        <label for="adminPassword">Contraseña de Administrador</label>
+                        <label for="adminPassword">Contraseña</label>
                     </div>
                 </div>
                 <div class="modal-footer justify-content-center border-0 pb-4">
@@ -354,15 +328,12 @@ try {
     
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // --- CIERRE DE SESIÓN ---
             document.getElementById('btn-cerrar-sesion').addEventListener('click', (e) => {
                 e.preventDefault();
                 localStorage.clear();
-                // Ruta correcta hacia tu archivo en la carpeta cnfg
                 window.location.href = '../cnfg/logout.php';
             });
 
-            // --- VARIABLES GLOBALES ---
             const inputEscaner = document.getElementById('inputEscaner');
             const inputCantidad = document.getElementById('inputCantidad');
             const btnConfirmar = document.getElementById('btnConfirmar');
@@ -379,14 +350,12 @@ try {
             
             let productoSeleccionado = null;
 
-            // Mantener el foco en el escáner
             document.body.addEventListener('click', (e) => {
                 if (!e.target.closest('.modal') && e.target !== inputCantidad && e.target !== inputEscaner) {
                     if(inputCantidad.disabled){ inputEscaner.focus(); }
                 }
             });
 
-            // 1. ESCUCHAR ESCÁNER (Buscar Producto en SQL Server)
             inputEscaner.addEventListener('keypress', async function(e) {
                 if (e.key === 'Enter') {
                     e.preventDefault();
@@ -403,10 +372,10 @@ try {
                         if (result.success) {
                             productoSeleccionado = result.producto;
                             
-                            lblNombreProducto.innerText = `Producto: ${productoSeleccionado.NOMBRE}`;
-                            lblStockActual.innerText = productoSeleccionado.STOCKACTUAL;
-                            lblStockMin.innerText = productoSeleccionado.STOCKMINIMO;
-                            lblStockMax.innerText = productoSeleccionado.STOCKMAXIMO;
+                            lblNombreProducto.innerText = `Producto: ${productoSeleccionado.nombre}`;
+                            lblStockActual.innerText = productoSeleccionado.stockactual;
+                            lblStockMin.innerText = productoSeleccionado.stockminimo;
+                            lblStockMax.innerText = productoSeleccionado.stockmaximo;
                             
                             infoProducto.classList.remove('d-none');
                             inputCantidad.disabled = false;
@@ -421,9 +390,8 @@ try {
                 }
             });
 
-            // 2. VALIDAR CANTIDADES Y LÍMITES (Ahora escuchamos el 'submit' del form)
             formMovimiento.addEventListener('submit', (e) => {
-                e.preventDefault(); // Evita la recarga de la página al dar Enter o Clic
+                e.preventDefault(); 
                 if(!productoSeleccionado) return;
 
                 const tipo = document.querySelector('input[name="tipoMovimiento"]:checked').value;
@@ -435,17 +403,15 @@ try {
                     return;
                 }
 
-                // Cálculo de límites (Con protección por si la base de datos devuelve null)
-                let stockActual = parseInt(productoSeleccionado.STOCKACTUAL) || 0;
-                let max = parseInt(productoSeleccionado.STOCKMAXIMO) || 0;
-                let min = parseInt(productoSeleccionado.STOCKMINIMO) || 0;
+                let stockActual = parseInt(productoSeleccionado.stockactual) || 0;
+                let max = parseInt(productoSeleccionado.stockmaximo) || 0;
+                let min = parseInt(productoSeleccionado.stockminimo) || 0;
                 let stockResultante = tipo === 'entrada' ? stockActual + cantidad : stockActual - cantidad;
 
-                // --- NUEVO CANDADO: EVITAR STOCK NEGATIVO ---
                 if (tipo === 'salida' && stockResultante < 0) {
                     document.getElementById('textoAlerta').innerText = `Stock insuficiente. Solo tienes ${stockActual} unidades disponibles en físico.`;
                     modalAlerta.show();
-                    return; // Detenemos el proceso aquí mismo
+                    return; 
                 }
 
                 if (tipo === 'entrada' && stockResultante > max) {
@@ -460,15 +426,15 @@ try {
                     return;
                 }
 
-                // Si todo está dentro de los límites, guardamos de inmediato
                 procesarMovimiento(tipo, cantidad);
             });
 
-            // 3. AUTORIZACIÓN DE ADMINISTRADOR (Desde el Modal)
             document.getElementById('btnAutorizar').addEventListener('click', async () => {
+                const user = document.getElementById('adminUser').value;
                 const password = document.getElementById('adminPassword').value;
-                if(password === '') {
-                    alert('Debe ingresar la contraseña de administrador');
+                
+                if(user === '' || password === '') {
+                    alert('Debe ingresar el usuario y contraseña del administrador');
                     return;
                 }
                 
@@ -476,7 +442,7 @@ try {
                     const response = await fetch('movimientos.php', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ accion: 'autorizar_admin', password: password })
+                        body: JSON.stringify({ accion: 'autorizar_admin', adminUser: user, password: password })
                     });
                     const result = await response.json();
 
@@ -485,24 +451,23 @@ try {
                         const cantidad = parseInt(inputCantidad.value);
                         
                         modalAlertaStock.hide();
+                        document.getElementById('adminUser').value = '';
                         document.getElementById('adminPassword').value = '';
                         procesarMovimiento(tipo, cantidad);
                     } else {
                         alert(result.message);
                     }
                 } catch (error) {
-                    alert('Error al verificar contraseña. Revisa la consola.');
+                    alert('Error al verificar credenciales.');
                 }
             });
 
-            // 4. GUARDAR MOVIMIENTO EN LA BASE DE DATOS
             async function procesarMovimiento(tipo, cantidad) {
-                // Deshabilitamos el botón temporalmente para evitar doble envío rápido
                 btnConfirmar.disabled = true;
 
                 const payload = {
                     accion: 'registrar_movimiento',
-                    idProducto: productoSeleccionado.IDPRODUCTO,
+                    idProducto: productoSeleccionado.idproducto,
                     tipo: tipo,
                     cantidad: cantidad
                 };
@@ -518,19 +483,18 @@ try {
 
                     if (result.success) {
                         alert(result.message);
-                        window.location.reload(); // Recarga la página para mostrar la tabla actualizada
+                        window.location.reload(); 
                     } else {
                         alert('Error de base de datos: ' + result.message);
-                        btnConfirmar.disabled = false; // Rehabilitamos si hubo error
+                        btnConfirmar.disabled = false;
                     }
                 } catch (error) {
                     console.error("Error al guardar:", error);
-                    alert("Se perdió la conexión con el servidor o la sesión expiró. Por favor recarga la página.");
+                    alert("Se perdió la conexión con el servidor.");
                     btnConfirmar.disabled = false;
                 }
             }
 
-            // Devolver foco al escáner al cerrar modales
             document.getElementById('modalAlerta').addEventListener('hidden.bs.modal', () => inputEscaner.focus());
         });
     </script>
