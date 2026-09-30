@@ -1,34 +1,52 @@
 <?php
 session_start();
-// Importamos la conexión real
-require_once '../cnfg/conexionBD.php';
+
+if (!isset($_SESSION['usuario_bd'])) {
+    header("Location: ../login/login.html");
+    exit;
+}
+
+$idUsuarioActual =$_SESSION['usuario_bd']; 
+$rolUsuarioActual = (strpos($idUsuarioActual, 'ADM') === 0) ? 'Administrador' : 'Operador';
+
+// Parámetros Neon
+$host = 'ep-royal-fire-b4e0qwit-pooler.c-6.us-east-2.aws.neon.tech';
+$dbname = 'neondb';$endpoint_id = 'ep-royal-fire-b4e0qwit';
+$dsn = "pgsql:host=$host;port=5432;dbname=$dbname;sslmode=require;options='endpoint=$endpoint_id'";
 
 // =======================================================================
-// 1. LÓGICA DE BACKEND (PHP + PDO) - API DE CONSULTA DE STOCK
+// 1. LÓGICA DE BACKEND (PHP + PDO) - API DE CONSULTA DE STOCK CON CTE
 // =======================================================================
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['accion'] === 'obtener_stock') {
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) &&$_GET['accion'] === 'obtener_stock') {
     header('Content-Type: application/json');
     
     try {
-        $db = new ConexionBD();
-        $conn = $db->getConnection();
+        $conn = new PDO($dsn, $_SESSION['usuario_bd'],$_SESSION['password_bd'], [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ]);
         
-        // Hacemos la consulta real. 
-        // Usamos "AS" para renombrar temporalmente las columnas y que el JavaScript del frontend no se rompa.
-        $query = "SELECT 
-                    CODIGODEBARRAS AS codigo, 
-                    NOMBRE AS nombre, 
-                    CATEGORIA AS categoria, 
-                    STOCKACTUAL AS stock_actual, 
-                    STOCKMINIMO AS cminima, 
-                    STOCKMAXIMO AS cmaxima 
-                  FROM PRODUCTOS 
-                  WHERE ESTATUS = 1";
+        // CTE: Aislar el catálogo activo antes de mapearlo al frontend
+        $query = '
+            WITH inventario_activo AS (
+                SELECT codigodebarras, nombre, categoria, stockactual, stockminimo, stockmaximo
+                FROM public.productos
+                WHERE estatus = true
+            )
+            SELECT 
+                codigodebarras AS "codigo", 
+                nombre AS "nombre", 
+                categoria AS "categoria", 
+                stockactual AS "stock_actual", 
+                stockminimo AS "cminima", 
+                stockmaximo AS "cmaxima"
+            FROM inventario_activo
+            ORDER BY nombre ASC
+        ';
                   
         $stmt = $conn->query($query);
-        $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $productos =$stmt->fetchAll();
         
-        // Devolvemos los datos reales en formato JSON
         echo json_encode(['success' => true, 'data' => $productos]);
         exit;
 
@@ -61,10 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
         <div class="brand-logo py-4 text-center mb-3">
             <i class="fas fa-boxes fa-2x mb-2"></i>
             <h5 class="mb-0 fw-bold">Gestión de Stock</h5>
-            <small class="text-white-50">
-                <?= isset($_SESSION['usuario_rol']) ? htmlspecialchars($_SESSION['usuario_rol']) : 'Usuario' ?> 
-                (<?= isset($_SESSION['usuario_folio']) ? htmlspecialchars($_SESSION['usuario_folio']) : 'Sin Folio' ?>)
-            </small>
+            <small class="text-white-50"><?= htmlspecialchars($rolUsuarioActual) ?> (<?= htmlspecialchars($idUsuarioActual) ?>)</small>
         </div>
         
         <ul class="nav flex-column mb-auto">
@@ -81,10 +96,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
                 <a href="../movimientos/movimientos.php" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
             </li>
             
-            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+            <li class="nav-item <?= ($rolUsuarioActual === 'Operador') ? 'd-none' : '' ?>">
                 <a href="../reportes/reportes.php" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
             </li>
-            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+            <li class="nav-item <?= ($rolUsuarioActual === 'Operador') ? 'd-none' : '' ?>">
                 <a href="../usuarios/usuarios.php" class="nav-link"><i class="fas fa-user-cog me-3"></i> Usuarios</a>
             </li>
         </ul>
@@ -204,7 +219,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
     
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // --- 1. LÓGICA DE ROLES Y SESIÓN ---
             const rolUsuario = localStorage.getItem('usuario_rol') || 'Administrador';
 
             if (rolUsuario === 'Operador') {
@@ -218,11 +232,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
                 window.location.href = '../cnfg/logout.php';
             });
 
-            // Poner fecha actual
             const opcionesFecha = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
             document.getElementById('fecha-actual').innerText = new Date().toLocaleDateString('es-MX', opcionesFecha);
 
-            // --- 2. LÓGICA DEL DASHBOARD (RF-04) ---
             let inventarioGlobal = [];
 
             const tabla = document.getElementById('tablaProductos');
@@ -313,7 +325,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
                 renderizarTabla(datosFiltrados);
             }
 
-            // Listeners para búsqueda en tiempo real
             inputBuscador.addEventListener('input', aplicarFiltros);
             filtroAbc.addEventListener('change', aplicarFiltros);
             filtroAlerta.addEventListener('change', aplicarFiltros);

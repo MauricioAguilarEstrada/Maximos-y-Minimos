@@ -1,12 +1,25 @@
 <?php
 session_start();
-require_once '../cnfg/conexionBD.php';
 
 // 1. PROTECCIÓN DE RUTA Y ROL (Solo Administradores)
-if (!isset($_SESSION['usuario_id']) || $_SESSION['usuario_rol'] !== 'Administrador') {
+if (!isset($_SESSION['usuario_bd'])) {
+    header("Location: ../login/login.html");
+    exit;
+}
+
+$idUsuarioActual = $_SESSION['usuario_bd']; 
+$rolUsuarioActual = (strpos($idUsuarioActual, 'ADM') === 0) ? 'Administrador' : 'Operador';
+
+if ($rolUsuarioActual !== 'Administrador') {
     header("Location: ../panelAdmin/panelAdmin.php");
     exit;
 }
+
+// Parámetros Neon
+$host = 'ep-royal-fire-b4e0qwit-pooler.c-6.us-east-2.aws.neon.tech';
+$dbname = 'neondb';
+$endpoint_id = 'ep-royal-fire-b4e0qwit';
+$dsn = "pgsql:host=$host;port=5432;dbname=$dbname;sslmode=require;options='endpoint=$endpoint_id'";
 
 // =======================================================================
 // 2. API PARA GENERAR REPORTES (Llamadas AJAX / GET)
@@ -18,8 +31,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
     $tipoReporte = $_GET['tipo'] ?? 'movimientos'; 
     
     try {
-        $db = new ConexionBD();
-        $conn = $db->getConnection();
+        $conn = new PDO($dsn, $_SESSION['usuario_bd'], $_SESSION['password_bd'], [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ]);
         
         $datosReporte = [
             'kpis' => ['entradas' => 0, 'salidas' => 0],
@@ -29,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
             'tipo' => $tipoReporte
         ];
 
-        $whereUsuario = $filtroUsuario !== 'ALL' ? " AND M.IDUSUARIO = :idUsuario " : "";
+        $whereUsuario = $filtroUsuario !== 'ALL' ? " AND m.idusuario = :idUsuario " : "";
 
         // =========================================================
         // A) LÓGICA EXCLUSIVA PARA EL REPORTE DE MOVIMIENTOS
@@ -37,14 +52,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
         if ($tipoReporte === 'movimientos') {
             
             // 1. Obtener KPIs Generales
-            $queryKPI = "
-                SELECT T.MOTIVO, SUM(D.CANTIDAD) as TOTAL
-                FROM DETALLESMOVIMIENTOS D
-                INNER JOIN MOVIMIENTOS M ON D.IDMOVIMIENTO = M.IDMOVIMIENTO
-                INNER JOIN TIPODEMOVIMIENTO T ON M.IDTIPODEMOVIMIENTO = T.IDTIPODEMOVIMIENTO
-                WHERE 1=1 $whereUsuario
-                GROUP BY T.MOTIVO
-            ";
+            $queryKPI = '
+                SELECT t.motivo AS "MOTIVO", SUM(d.cantidad) AS "TOTAL"
+                FROM public.detallesmovimientos d
+                INNER JOIN public.movimientos m ON d.idmovimiento = m.idmovimiento
+                INNER JOIN public.tipodemovimiento t ON m.idtipodemovimiento = t.idtipodemovimiento
+                WHERE 1=1 ' . $whereUsuario . '
+                GROUP BY t.motivo
+            ';
             $stmtKPI = $conn->prepare($queryKPI);
             if($filtroUsuario !== 'ALL') $stmtKPI->bindParam(':idUsuario', $filtroUsuario);
             $stmtKPI->execute();
@@ -53,51 +68,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
                 if ($row['MOTIVO'] === 'Salida') $datosReporte['kpis']['salidas'] = $row['TOTAL'];
             }
 
-            // 2. Gráfica 1: Entradas y Salidas por Usuario (GENERAL)
-            $queryUsu = "
-                SELECT U.NOMBRE, T.MOTIVO, SUM(D.CANTIDAD) as TOTAL
-                FROM DETALLESMOVIMIENTOS D
-                INNER JOIN MOVIMIENTOS M ON D.IDMOVIMIENTO = M.IDMOVIMIENTO
-                INNER JOIN TIPODEMOVIMIENTO T ON M.IDTIPODEMOVIMIENTO = T.IDTIPODEMOVIMIENTO
-                INNER JOIN USUARIOS U ON M.IDUSUARIO = U.IDUSUARIO
-                WHERE 1=1 $whereUsuario
-                GROUP BY U.NOMBRE, T.MOTIVO
-                ORDER BY U.NOMBRE
-            ";
+            // 2. Gráfica 1: Entradas y Salidas por Usuario (Usando CTE de Productividad)
+            $queryUsu = '
+                WITH productividades AS (
+                    SELECT m.idusuario, t.motivo, SUM(d.cantidad) as total_operaciones
+                    FROM public.detallesmovimientos d
+                    INNER JOIN public.movimientos m ON d.idmovimiento = m.idmovimiento
+                    INNER JOIN public.tipodemovimiento t ON m.idtipodemovimiento = t.idtipodemovimiento
+                    WHERE 1=1 ' . $whereUsuario . '
+                    GROUP BY m.idusuario, t.motivo
+                )
+                SELECT u.nombre AS "NOMBRE", p.motivo AS "MOTIVO", p.total_operaciones AS "TOTAL"
+                FROM productividades p
+                INNER JOIN public.usuarios u ON p.idusuario = u.idusuario
+                ORDER BY u.nombre
+            ';
             $stmtUsu = $conn->prepare($queryUsu);
             if($filtroUsuario !== 'ALL') $stmtUsu->bindParam(':idUsuario', $filtroUsuario);
             $stmtUsu->execute();
             $datosReporte['grafica_usuarios'] = $stmtUsu->fetchAll();
 
-            // 3. Gráfica 2: Top 5 Productos con más salidas (GENERAL)
-            $queryTop = "
-                SELECT TOP 5 P.NOMBRE, SUM(D.CANTIDAD) as TOTAL_SALIDAS
-                FROM DETALLESMOVIMIENTOS D
-                INNER JOIN MOVIMIENTOS M ON D.IDMOVIMIENTO = M.IDMOVIMIENTO
-                INNER JOIN PRODUCTOS P ON D.IDPRODUCTO = P.IDPRODUCTO
-                INNER JOIN TIPODEMOVIMIENTO T ON M.IDTIPODEMOVIMIENTO = T.IDTIPODEMOVIMIENTO
-                WHERE T.MOTIVO = 'Salida' $whereUsuario
-                GROUP BY P.NOMBRE
-                ORDER BY TOTAL_SALIDAS DESC
-            ";
+            // 3. Gráfica 2: Top 5 Productos con más salidas (Usando CTE de Rotación)
+            $queryTop = '
+                WITH rotacion_productos AS (
+                    SELECT d.idproducto, SUM(d.cantidad) AS total_salidas
+                    FROM public.detallesmovimientos d
+                    INNER JOIN public.movimientos m ON d.idmovimiento = m.idmovimiento
+                    INNER JOIN public.tipodemovimiento t ON m.idtipodemovimiento = t.idtipodemovimiento
+                    WHERE t.motivo = \'Salida\' ' . $whereUsuario . '
+                    GROUP BY d.idproducto
+                )
+                SELECT p.nombre AS "NOMBRE", rp.total_salidas AS "TOTAL_SALIDAS"
+                FROM rotacion_productos rp
+                INNER JOIN public.productos p ON rp.idproducto = p.idproducto
+                ORDER BY rp.total_salidas DESC
+                LIMIT 5
+            ';
             $stmtTop = $conn->prepare($queryTop);
             if($filtroUsuario !== 'ALL') $stmtTop->bindParam(':idUsuario', $filtroUsuario);
             $stmtTop->execute();
             $datosReporte['top_productos'] = $stmtTop->fetchAll();
 
             // 4. Detalle para la Tabla
-            $queryDetalle = "
-                SELECT TOP 50 
-                    T.MOTIVO, P.NOMBRE as PRODUCTO, D.CANTIDAD, U.NOMBRE as USUARIO,
-                    FORMAT(M.FECHAHORA, 'dd/MM/yyyy HH:mm') AS FECHA_MOV
-                FROM MOVIMIENTOS M
-                INNER JOIN DETALLESMOVIMIENTOS D ON M.IDMOVIMIENTO = D.IDMOVIMIENTO
-                INNER JOIN PRODUCTOS P ON D.IDPRODUCTO = P.IDPRODUCTO
-                INNER JOIN TIPODEMOVIMIENTO T ON M.IDTIPODEMOVIMIENTO = T.IDTIPODEMOVIMIENTO
-                INNER JOIN USUARIOS U ON M.IDUSUARIO = U.IDUSUARIO
-                WHERE 1=1 $whereUsuario
-                ORDER BY M.IDMOVIMIENTO DESC
-            ";
+            $queryDetalle = '
+                SELECT 
+                    t.motivo AS "MOTIVO", p.nombre AS "PRODUCTO", d.cantidad AS "CANTIDAD", u.nombre AS "USUARIO",
+                    TO_CHAR(m.fechahora, \'DD/MM/YYYY HH24:MI\') AS "FECHA_MOV"
+                FROM public.movimientos m
+                INNER JOIN public.detallesmovimientos d ON m.idmovimiento = d.idmovimiento
+                INNER JOIN public.productos p ON d.idproducto = p.idproducto
+                INNER JOIN public.tipodemovimiento t ON m.idtipodemovimiento = t.idtipodemovimiento
+                INNER JOIN public.usuarios u ON m.idusuario = u.idusuario
+                WHERE 1=1 ' . $whereUsuario . '
+                ORDER BY m.idmovimiento DESC
+                LIMIT 50
+            ';
             $stmtDetalle = $conn->prepare($queryDetalle);
             if($filtroUsuario !== 'ALL') $stmtDetalle->bindParam(':idUsuario', $filtroUsuario);
             $stmtDetalle->execute();
@@ -108,7 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
         // B) LÓGICA EXCLUSIVA PARA EL REPORTE DE EXISTENCIAS
         // =========================================================
         else if ($tipoReporte === 'existencias') {
-            $queryDetalle = "SELECT CODIGODEBARRAS, NOMBRE, CATEGORIA, STOCKACTUAL, STOCKMINIMO, STOCKMAXIMO FROM PRODUCTOS WHERE ESTATUS = 1 ORDER BY NOMBRE ASC";
+            $queryDetalle = 'SELECT codigodebarras AS "CODIGODEBARRAS", nombre AS "NOMBRE", categoria AS "CATEGORIA", stockactual AS "STOCKACTUAL", stockminimo AS "STOCKMINIMO", stockmaximo AS "STOCKMAXIMO" FROM public.productos WHERE estatus = true ORDER BY nombre ASC';
             $stmtDetalle = $conn->query($queryDetalle);
             $datosReporte['detalle'] = $stmtDetalle->fetchAll();
         }
@@ -119,36 +144,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
         else if ($tipoReporte === 'inactivos') {
             
             // 1. Detalle para la Tabla
-            $queryDetalle = "SELECT CODIGODEBARRAS, NOMBRE, CATEGORIA, STOCKACTUAL, FORMAT(FECHAMODIFICACION, 'dd/MM/yyyy') AS FECHA_BAJA FROM PRODUCTOS WHERE ESTATUS = 0 ORDER BY FECHAMODIFICACION DESC";
+            $queryDetalle = 'SELECT codigodebarras AS "CODIGODEBARRAS", nombre AS "NOMBRE", categoria AS "CATEGORIA", stockactual AS "STOCKACTUAL", TO_CHAR(fechamodificacion, \'DD/MM/YYYY\') AS "FECHA_BAJA" FROM public.productos WHERE estatus = false ORDER BY fechamodificacion DESC';
             $stmtDetalle = $conn->query($queryDetalle);
             $datosReporte['detalle'] = $stmtDetalle->fetchAll();
 
             // 2. Gráfica 1: Histórico de Movimientos (SOLO INACTIVOS)
-            $queryUsu = "
-                SELECT U.NOMBRE, T.MOTIVO, SUM(D.CANTIDAD) as TOTAL
-                FROM DETALLESMOVIMIENTOS D
-                INNER JOIN MOVIMIENTOS M ON D.IDMOVIMIENTO = M.IDMOVIMIENTO
-                INNER JOIN TIPODEMOVIMIENTO T ON M.IDTIPODEMOVIMIENTO = T.IDTIPODEMOVIMIENTO
-                INNER JOIN USUARIOS U ON M.IDUSUARIO = U.IDUSUARIO
-                INNER JOIN PRODUCTOS P ON D.IDPRODUCTO = P.IDPRODUCTO
-                WHERE P.ESTATUS = 0
-                GROUP BY U.NOMBRE, T.MOTIVO
-                ORDER BY U.NOMBRE
-            ";
+            $queryUsu = '
+                SELECT u.nombre AS "NOMBRE", t.motivo AS "MOTIVO", SUM(d.cantidad) AS "TOTAL"
+                FROM public.detallesmovimientos d
+                INNER JOIN public.movimientos m ON d.idmovimiento = m.idmovimiento
+                INNER JOIN public.tipodemovimiento t ON m.idtipodemovimiento = t.idtipodemovimiento
+                INNER JOIN public.usuarios u ON m.idusuario = u.idusuario
+                INNER JOIN public.productos p ON d.idproducto = p.idproducto
+                WHERE p.estatus = false
+                GROUP BY u.nombre, t.motivo
+                ORDER BY u.nombre
+            ';
             $stmtUsu = $conn->query($queryUsu);
             $datosReporte['grafica_usuarios'] = $stmtUsu->fetchAll();
 
             // 3. Gráfica 2: Top 5 Productos Inactivos con más salidas
-            $queryTop = "
-                SELECT TOP 5 P.NOMBRE, SUM(D.CANTIDAD) as TOTAL_SALIDAS
-                FROM DETALLESMOVIMIENTOS D
-                INNER JOIN MOVIMIENTOS M ON D.IDMOVIMIENTO = M.IDMOVIMIENTO
-                INNER JOIN PRODUCTOS P ON D.IDPRODUCTO = P.IDPRODUCTO
-                INNER JOIN TIPODEMOVIMIENTO T ON M.IDTIPODEMOVIMIENTO = T.IDTIPODEMOVIMIENTO
-                WHERE T.MOTIVO = 'Salida' AND P.ESTATUS = 0
-                GROUP BY P.NOMBRE
-                ORDER BY TOTAL_SALIDAS DESC
-            ";
+            $queryTop = '
+                SELECT p.nombre AS "NOMBRE", SUM(d.cantidad) AS "TOTAL_SALIDAS"
+                FROM public.detallesmovimientos d
+                INNER JOIN public.movimientos m ON d.idmovimiento = m.idmovimiento
+                INNER JOIN public.productos p ON d.idproducto = p.idproducto
+                INNER JOIN public.tipodemovimiento t ON m.idtipodemovimiento = t.idtipodemovimiento
+                WHERE t.motivo = \'Salida\' AND p.estatus = false
+                GROUP BY p.nombre
+                ORDER BY "TOTAL_SALIDAS" DESC
+                LIMIT 5
+            ';
             $stmtTop = $conn->query($queryTop);
             $datosReporte['top_productos'] = $stmtTop->fetchAll();
         }
@@ -167,13 +193,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['accion']) && $_GET['acc
 // =======================================================================
 $listaUsuariosFiltro = [];
 try {
-    $db = new ConexionBD();
-    $conn = $db->getConnection();
-    $stmt = $conn->query("SELECT IDUSUARIO, NOMBRE FROM USUARIOS ORDER BY NOMBRE ASC");
-    $listaUsuariosFiltro = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $connGET = new PDO($dsn, $_SESSION['usuario_bd'], $_SESSION['password_bd'], [PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    $stmt = $connGET->query('SELECT idusuario AS "IDUSUARIO", nombre AS "NOMBRE" FROM public.usuarios WHERE acceso NOT LIKE \'DEL-%\' ORDER BY nombre ASC');
+    $listaUsuariosFiltro = $stmt->fetchAll();
 } catch(PDOException $e) {}
 ?>
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -186,12 +210,10 @@ try {
     <link rel="stylesheet" href="../Assets/style.css">
     
     <style>
-        /* Estilo personalizado para el scroll de la tabla */
         .tabla-scroll-interno {
             max-height: 400px;
             overflow-y: auto;
         }
-        /* Opcional: Hacer el encabezado pegajoso (sticky) */
         .tabla-scroll-interno thead th {
             position: sticky;
             top: 0;
@@ -206,10 +228,7 @@ try {
         <div class="brand-logo py-4 text-center mb-3">
             <i class="fas fa-boxes fa-2x mb-2"></i>
             <h5 class="mb-0 fw-bold">Gestión de Stock</h5>
-            <small class="text-white-50">
-                <?= isset($_SESSION['usuario_rol']) ? htmlspecialchars($_SESSION['usuario_rol']) : 'Usuario' ?> 
-                (<?= isset($_SESSION['usuario_folio']) ? htmlspecialchars($_SESSION['usuario_folio']) : 'Sin Folio' ?>)
-            </small>
+            <small class="text-white-50"><?= htmlspecialchars($rolUsuarioActual) ?> (<?= htmlspecialchars($idUsuarioActual) ?>)</small>
         </div>
         
         <ul class="nav flex-column mb-auto">
@@ -226,10 +245,10 @@ try {
                 <a href="../movimientos/movimientos.php" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
             </li>
             
-            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+            <li class="nav-item <?= ($rolUsuarioActual === 'Operador') ? 'd-none' : '' ?>">
                 <a href="../reportes/reportes.php" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
             </li>
-            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+            <li class="nav-item <?= ($rolUsuarioActual === 'Operador') ? 'd-none' : '' ?>">
                 <a href="../usuarios/usuarios.php" class="nav-link"><i class="fas fa-user-cog me-3"></i> Usuarios</a>
             </li>
         </ul>
@@ -254,7 +273,7 @@ try {
 
                 <select id="filtro-usuario" class="form-select border-secondary text-secondary shadow-sm">
                     <option value="ALL">Todos los Usuarios</option>
-                    <?php foreach($listaUsuariosFiltro as $usr): ?>
+                    <?php foreach($listaUsuariosFiltro as$usr): ?>
                         <option value="<?= $usr['IDUSUARIO'] ?>"><?= htmlspecialchars($usr['NOMBRE']) ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -349,7 +368,6 @@ try {
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             
-            // Cierre de Sesión
             document.getElementById('btn-cerrar-sesion').addEventListener('click', (e) => {
                 e.preventDefault();
                 localStorage.clear();
@@ -359,7 +377,6 @@ try {
             let chartUsuarios = null;
             let chartProductos = null;
 
-            // --- LÓGICA DE INTERFAZ (VISIBILIDAD Y TÍTULOS DINÁMICOS) ---
             document.getElementById('filtro-tipo').addEventListener('change', function() {
                 const tipo = this.value;
                 const fUsu = document.getElementById('filtro-usuario');
@@ -391,7 +408,6 @@ try {
                 cargarReporte(); 
             });
 
-            // --- LÓGICA DE DATOS ---
             async function cargarReporte() {
                 const usuarioSelect = document.getElementById('filtro-usuario').value;
                 const tipoSelect = document.getElementById('filtro-tipo').value;
@@ -424,11 +440,9 @@ try {
                 }
             }
 
-            // Pasamos un parámetro extra para saber qué texto ponerle a la gráfica
             function renderGraficaUsuarios(datosRaw, contexto) {
                 const contenedor = document.getElementById('contenedor-grafica-usu');
                 
-                // DESTRUIR LA GRÁFICA ANTERIOR ANTES DE TOCAR EL HTML
                 if(chartUsuarios) chartUsuarios.destroy(); 
                 
                 if(!datosRaw || datosRaw.length === 0) {
@@ -436,7 +450,6 @@ try {
                     return;
                 }
 
-                // Restauramos el canvas limpio
                 contenedor.innerHTML = '<canvas id="graficaUsuarios" height="100"></canvas>';
                 const ctx = document.getElementById('graficaUsuarios').getContext('2d');
                 
@@ -470,7 +483,6 @@ try {
             function renderGraficaProductos(datosRaw) {
                 const contenedor = document.getElementById('contenedor-grafica-prod');
                 
-                // DESTRUIR LA GRÁFICA ANTERIOR ANTES DE TOCAR EL HTML
                 if(chartProductos) chartProductos.destroy();
                 
                 if(!datosRaw || datosRaw.length === 0) {
@@ -478,7 +490,6 @@ try {
                     return;
                 }
 
-                // Restauramos el canvas
                 contenedor.innerHTML = '<canvas id="graficaProductos"></canvas>';
                 const ctx = document.getElementById('graficaProductos').getContext('2d');
                 
@@ -540,9 +551,8 @@ try {
                 }
             }
 
-            // Iniciar y enlazar el botón actualizar
             document.getElementById('btn-actualizar').addEventListener('click', cargarReporte);
-            cargarReporte(); // Cargar la primera vez al entrar
+            cargarReporte();
         });
     </script>
 </body>
