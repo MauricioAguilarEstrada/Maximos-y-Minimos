@@ -1,17 +1,22 @@
 <?php
 session_start();
-require_once '../cnfg/conexionBD.php';
 
-// Verificación de sesión
-if (!isset($_SESSION['usuario_id'])) {
+// 1. Verificación de sesión segura (Arquitectura PostgreSQL)
+if (!isset($_SESSION['usuario_bd'])) {
     header("Location: ../login/login.html");
     exit;
 }
 
-$idUsuarioActual = $_SESSION['usuario_id'];
-$rolUsuarioActual = $_SESSION['usuario_rol'];
-$folioUsuarioActual = $_SESSION['usuario_folio'];
-$nombreUsuarioActual = $_SESSION['usuario_nombre'] ?? 'Usuario';
+$idUsuarioActual = $_SESSION['usuario_bd']; // El folio (Ej. OPR-0001)
+$rolUsuarioActual = (strpos($idUsuarioActual, 'ADM') === 0) ? 'Administrador' : 'Operador';
+$folioUsuarioActual = $idUsuarioActual;
+$nombreUsuarioActual = $_SESSION['nombre_usuario'] ?? 'Usuario';
+
+// Parámetros Neon
+$host = 'ep-royal-fire-b4e0qwit-pooler.c-6.us-east-2.aws.neon.tech';
+$dbname = 'neondb';
+$endpoint_id = 'ep-royal-fire-b4e0qwit';
+$dsn = "pgsql:host=$host;port=5432;dbname=$dbname;sslmode=require;options='endpoint=$endpoint_id'";
 
 // Variables para estadísticas y actividad
 $totalEntradas = 0;
@@ -19,41 +24,52 @@ $totalSalidas = 0;
 $actividades = [];
 
 try {
-    $db = new ConexionBD();
-    $conn = $db->getConnection();
+    $conn = new PDO($dsn, $_SESSION['usuario_bd'], $_SESSION['password_bd'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+    ]);
 
-    // 1. Obtener estadísticas totales de este usuario
-    $queryStats = "
-        SELECT T.MOTIVO, SUM(D.CANTIDAD) as TOTAL_ITEMS 
-        FROM MOVIMIENTOS M 
-        INNER JOIN DETALLESMOVIMIENTOS D ON M.IDMOVIMIENTO = D.IDMOVIMIENTO
-        INNER JOIN TIPODEMOVIMIENTO T ON M.IDTIPODEMOVIMIENTO = T.IDTIPODEMOVIMIENTO
-        WHERE M.IDUSUARIO = :idUsuario
-        GROUP BY T.MOTIVO
-    ";
+    // 1. CTE: Agrupar estadísticas totales del usuario en memoria
+    $queryStats = '
+        WITH totales AS (
+            SELECT m.idusuario, t.motivo, SUM(d.cantidad) as total_items 
+            FROM public.movimientos m 
+            INNER JOIN public.detallesmovimientos d ON m.idmovimiento = d.idmovimiento
+            INNER JOIN public.tipodemovimiento t ON m.idtipodemovimiento = t.idtipodemovimiento
+            WHERE m.idusuario = (SELECT idusuario FROM public.usuarios WHERE acceso = :acceso)
+            GROUP BY m.idusuario, t.motivo
+        )
+        SELECT motivo AS "MOTIVO", total_items AS "TOTAL_ITEMS" FROM totales
+    ';
     $stmtStats = $conn->prepare($queryStats);
-    $stmtStats->execute([':idUsuario' => $idUsuarioActual]);
+    $stmtStats->execute([':acceso' => $idUsuarioActual]);
     
-    while ($row = $stmtStats->fetch(PDO::FETCH_ASSOC)) {
+    while ($row = $stmtStats->fetch()) {
         if ($row['MOTIVO'] === 'Entrada') $totalEntradas = $row['TOTAL_ITEMS'];
         if ($row['MOTIVO'] === 'Salida') $totalSalidas = $row['TOTAL_ITEMS'];
     }
 
-    // 2. Obtener las últimas 15 actividades (Movimientos) del usuario
-    $queryActividad = "
-        SELECT TOP 15 
-            T.MOTIVO, P.NOMBRE as PRODUCTO, D.CANTIDAD,
-            FORMAT(M.FECHAHORA, 'dd/MM/yyyy HH:mm') AS FECHA_MOV
-        FROM MOVIMIENTOS M
-        INNER JOIN DETALLESMOVIMIENTOS D ON M.IDMOVIMIENTO = D.IDMOVIMIENTO
-        INNER JOIN PRODUCTOS P ON D.IDPRODUCTO = P.IDPRODUCTO
-        INNER JOIN TIPODEMOVIMIENTO T ON M.IDTIPODEMOVIMIENTO = T.IDTIPODEMOVIMIENTO
-        WHERE M.IDUSUARIO = :idUsuario
-        ORDER BY M.IDMOVIMIENTO DESC
-    ";
+    // 2. CTE: Aislar las últimas 15 actividades del usuario (Usando LIMIT y TO_CHAR)
+    $queryActividad = '
+        WITH historial_reciente AS (
+            SELECT 
+                t.motivo, p.nombre as producto, d.cantidad,
+                TO_CHAR(m.fechahora, \'DD/MM/YYYY HH24:MI\') as fecha_mov,
+                m.idmovimiento
+            FROM public.movimientos m
+            INNER JOIN public.detallesmovimientos d ON m.idmovimiento = d.idmovimiento
+            INNER JOIN public.productos p ON d.idproducto = p.idproducto
+            INNER JOIN public.tipodemovimiento t ON m.idtipodemovimiento = t.idtipodemovimiento
+            WHERE m.idusuario = (SELECT idusuario FROM public.usuarios WHERE acceso = :acceso)
+        )
+        SELECT motivo AS "MOTIVO", producto AS "PRODUCTO", cantidad AS "CANTIDAD", fecha_mov AS "FECHA_MOV"
+        FROM historial_reciente
+        ORDER BY idmovimiento DESC
+        LIMIT 15
+    ';
     $stmtAct = $conn->prepare($queryActividad);
-    $stmtAct->execute([':idUsuario' => $idUsuarioActual]);
-    $actividades = $stmtAct->fetchAll(PDO::FETCH_ASSOC);
+    $stmtAct->execute([':acceso' => $idUsuarioActual]);
+    $actividades = $stmtAct->fetchAll();
 
 } catch(PDOException $e) {
     $error_bd = "No se pudieron cargar los datos del perfil: " . $e->getMessage();
@@ -93,10 +109,10 @@ try {
                 <a href="../movimientos/movimientos.php" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
             </li>
             
-            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+            <li class="nav-item <?= ($rolUsuarioActual === 'Operador') ? 'd-none' : '' ?>">
                 <a href="../reportes/reportes.php" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
             </li>
-            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+            <li class="nav-item <?= ($rolUsuarioActual === 'Operador') ? 'd-none' : '' ?>">
                 <a href="../usuarios/usuarios.php" class="nav-link"><i class="fas fa-user-cog me-3"></i> Usuarios</a>
             </li>
         </ul>
@@ -179,10 +195,10 @@ try {
                                     </div>
                                     <div class="flex-grow-1">
                                         <p class="mb-0">
-                                            <strong><?= $textoAccion ?> <?= $act['CANTIDAD'] ?> unidades</strong> de 
+                                            <strong><?= $textoAccion ?> <?= htmlspecialchars($act['CANTIDAD']) ?> unidades</strong> de 
                                             <span class="text-primary fw-bold"><?= htmlspecialchars($act['PRODUCTO']) ?></span>
                                         </p>
-                                        <small class="text-muted"><i class="far fa-clock me-1"></i><?= $act['FECHA_MOV'] ?? 'N/D' ?></small>
+                                        <small class="text-muted"><i class="far fa-clock me-1"></i><?= htmlspecialchars($act['FECHA_MOV']) ?? 'N/D' ?></small>
                                     </div>
                                 </div>
                                 <?php endforeach; ?>

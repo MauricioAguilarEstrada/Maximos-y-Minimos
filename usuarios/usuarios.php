@@ -1,14 +1,23 @@
 <?php
 session_start();
-require_once '../cnfg/conexionBD.php';
 
-// 1. PROTECCIÓN DE RUTA Y ROL
-if (!isset($_SESSION['usuario_id']) || $_SESSION['usuario_rol'] !== 'Administrador') {
+if (!isset($_SESSION['usuario_bd'])) {
+    header("Location: ../login/login.html");
+    exit;
+}
+
+$idUsuarioActual =$_SESSION['usuario_bd']; 
+$rolUsuarioActual = (strpos($idUsuarioActual, 'ADM') === 0) ? 'Administrador' : 'Operador';
+
+if ($rolUsuarioActual !== 'Administrador') {
     header("Location: ../panelAdmin/panelAdmin.php");
     exit;
 }
 
-$idUsuarioActual = $_SESSION['usuario_id'];
+// Parámetros Neon
+$host = 'ep-royal-fire-b4e0qwit-pooler.c-6.us-east-2.aws.neon.tech';
+$dbname = 'neondb';$endpoint_id = 'ep-royal-fire-b4e0qwit';
+$dsn = "pgsql:host=$host;port=5432;dbname=$dbname;sslmode=require;options='endpoint=$endpoint_id'";
 
 // =======================================================================
 // 2. LÓGICA DE BACKEND (PETICIONES AJAX / POST)
@@ -16,25 +25,19 @@ $idUsuarioActual = $_SESSION['usuario_id'];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
     $data = json_decode(file_get_contents("php://input"), true);
-    $accion = $data['accion'] ?? '';
+    $accion =$data['accion'] ?? '';
 
     try {
-        $db = new ConexionBD();
-        $conn = $db->getConnection();
+        $conn = new PDO($dsn, $_SESSION['usuario_bd'],$_SESSION['password_bd'], [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ]);
 
-        // A) CREAR NUEVO USUARIO
+        // A) CREAR NUEVO USUARIO (Delega la creación al Procedure)
         if ($accion === 'crear') {
             $folio = strtoupper(trim($data['folio']));
             
-            // Verificar que el folio no exista ya
-            $stmtCheck = $conn->prepare("SELECT IDUSUARIO FROM USUARIOS WHERE ACCESO = :folio");
-            $stmtCheck->execute([':folio' => $folio]);
-            if ($stmtCheck->fetch()) {
-                echo json_encode(['success' => false, 'message' => 'El folio ' . $folio . ' ya pertenece a otro usuario. Intenta con otro número.']);
-                exit;
-            }
-
-            $stmtInsert = $conn->prepare("INSERT INTO USUARIOS (ACCESO, NOMBRE, PASSWRD, ROL, ESTATUS) VALUES (:folio, :nombre, :pass, :rol, 1)");
+            $stmtInsert =$conn->prepare("CALL public.crear_usuario_sistema(:folio, :nombre, :pass, :rol)");
             $stmtInsert->execute([
                 ':folio' => $folio,
                 ':nombre' => trim($data['nombre']),
@@ -46,27 +49,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
-        // B) CAMBIAR ESTATUS (Activar / Desactivar)
+        // B) CAMBIAR ESTATUS (Bloquea el acceso en BD)
         if ($accion === 'cambiar_estatus') {
-            $idTarget = $data['idUsuario'];
-            $nuevoEstatus = $data['nuevoEstatus']; // 1 o 0
+            $idTarget =$data['idUsuario'];
+            $nuevoEstatus =$data['nuevoEstatus'] == 1 ? 'true' : 'false';
 
-            // Protección extra: Un admin no puede desactivarse a sí mismo
-            if ($idTarget == $idUsuarioActual && $nuevoEstatus == 0) {
+            $stmtGet =$conn->prepare("SELECT acceso FROM public.usuarios WHERE idusuario = :id");
+            $stmtGet->execute([':id' =>$idTarget]);
+            $accesoTarget =$stmtGet->fetchColumn();
+
+            if ($accesoTarget === $idUsuarioActual &&$nuevoEstatus === 'false') {
                 echo json_encode(['success' => false, 'message' => 'No puedes desactivar tu propia cuenta.']);
                 exit;
             }
 
-            $stmtUpdate = $conn->prepare("UPDATE USUARIOS SET ESTATUS = :estatus WHERE IDUSUARIO = :id");
-            $stmtUpdate->execute([':estatus' => $nuevoEstatus, ':id' => $idTarget]);
+            $stmtUpdate =$conn->prepare("CALL public.cambiar_estatus_usuario(:id, $nuevoEstatus)");
+            $stmtUpdate->execute([':id' =>$idTarget]);
 
             echo json_encode(['success' => true, 'message' => 'El estatus del usuario ha sido actualizado.']);
             exit;
         }
 
-        // C) RESTABLECER CONTRASEÑA
+        // C) RESTABLECER CONTRASEÑA (Actualiza el rol de BD)
         if ($accion === 'restablecer_pass') {
-            $stmtPass = $conn->prepare("UPDATE USUARIOS SET PASSWRD = :pass WHERE IDUSUARIO = :id");
+            $stmtPass =$conn->prepare("CALL public.restablecer_password(:id, :pass)");
             $stmtPass->execute([
                 ':pass' => $data['nuevaPassword'],
                 ':id' => $data['idUsuario']
@@ -76,61 +82,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
-        // D) ELIMINAR USUARIO POR COMPLETO (Físicamente de la BD)
+        // D) ELIMINAR USUARIO POR COMPLETO O ARCHIVARLO (Delegado a PostgreSQL)
         if ($accion === 'eliminar_completo') {
             $idTarget = $data['idUsuario'];
             
-            // Protección: No puedes borrarte a ti mismo
-            if ($idTarget == $idUsuarioActual) {
-                echo json_encode(['success' => false, 'message' => 'No puedes eliminar tu propia cuenta de forma permanente.']);
+            // Verificamos quién es el usuario a borrar para evitar que el admin se borre a sí mismo
+            $stmtGet = $conn->prepare("SELECT acceso FROM public.usuarios WHERE idusuario = :id");
+            $stmtGet->execute([':id' => $idTarget]);
+            $accesoTarget = $stmtGet->fetchColumn();
+
+            if ($accesoTarget === $idUsuarioActual) {
+                echo json_encode(['success' => false, 'message' => 'No puedes eliminar tu propia cuenta.']);
                 exit;
             }
 
-            $stmtDelete = $conn->prepare("DELETE FROM USUARIOS WHERE IDUSUARIO = :id");
+            // Llamamos al procedimiento que decide si borra físicamente o archiva
+            $stmtDelete = $conn->prepare("CALL public.eliminar_o_archivar_usuario(:id)");
             $stmtDelete->execute([':id' => $idTarget]);
 
-            echo json_encode(['success' => true, 'message' => 'El usuario ha sido eliminado permanentemente del sistema.']);
+            echo json_encode(['success' => true, 'message' => 'El usuario ha sido procesado (Eliminado o Archivado según su historial).']);
             exit;
         }
 
     } catch(PDOException $e) {
-        // Si el error es por Integridad Referencial (Código 23000) y estábamos intentando eliminar...
-        if ($e->getCode() == '23000' && $accion === 'eliminar_completo') {
-            $idTarget = $data['idUsuario'];
-            
-            try {
-                // 1. Obtenemos los datos actuales del usuario
-                $stmtGet = $conn->prepare("SELECT ACCESO FROM USUARIOS WHERE IDUSUARIO = :id");
-                $stmtGet->execute([':id' => $idTarget]);
-                $user = $stmtGet->fetch(PDO::FETCH_ASSOC);
-                
-                if ($user) {
-                    $folioViejo = $user['ACCESO']; 
-                    
-                    // 2. Creamos un folio "basura" que mida EXACTAMENTE 8 caracteres (Ej: DEL-0015)
-                    $folioBaja = 'DEL-' . str_pad($idTarget, 4, '0', STR_PAD_LEFT);
-                    
-                    // 3. Archivamos al usuario (Soft-Delete)
-                    // Usamos SUBSTRING en SQL Server para evitar desbordar la columna NOMBRE
-                    $stmtSoftDelete = $conn->prepare("UPDATE USUARIOS SET ACCESO = :nuevoFolio, ESTATUS = 0, NOMBRE = CONCAT(SUBSTRING(NOMBRE, 1, 40), ' (Archivado)') WHERE IDUSUARIO = :id");
-                    $stmtSoftDelete->execute([
-                        ':nuevoFolio' => $folioBaja,
-                        ':id' => $idTarget
-                    ]);
-                    
-                    echo json_encode([
-                        'success' => true, 
-                        'message' => "El usuario tenía historial y se archivó de forma segura. El folio $folioViejo ya fue liberado."
-                    ]);
-                }
-            } catch(PDOException $ex) {
-                // Si la actualización falla (ej. por límites de columna), devolvemos un JSON válido para que JS lo pueda leer
-                echo json_encode(['success' => false, 'message' => 'Error interno al intentar archivar: ' . $ex->getMessage()]);
-            }
+        if ($e->getCode() == '23505' && $accion === 'crear') {
+            echo json_encode(['success' => false, 'message' => 'El folio ya pertenece a otro usuario.']);
             exit;
         }
-        
-        // Si es cualquier otro tipo de error de la base de datos
         echo json_encode(['success' => false, 'message' => 'Error de BD: ' . $e->getMessage()]);
         exit;
     }
@@ -140,19 +118,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // =======================================================================
 $listaUsuarios = [];
 try {
-    $db = new ConexionBD();
-    $conn = $db->getConnection();
-    // NUEVA CONSULTA: Filtramos a los usuarios cuyo folio empieza con 'DEL-'
+    $connGET = new PDO($dsn, $_SESSION['usuario_bd'],$_SESSION['password_bd'], [PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+    // Deducimos el rol para mantener la vista intacta
     $query = "
-        SELECT IDUSUARIO, ACCESO, NOMBRE, ROL, ESTATUS 
-        FROM USUARIOS 
-        WHERE ACCESO NOT LIKE 'DEL-%' 
-        ORDER BY ESTATUS DESC, ROL ASC, NOMBRE ASC
+        SELECT 
+            idusuario AS \"IDUSUARIO\", 
+            acceso AS \"ACCESO\", 
+            nombre AS \"NOMBRE\", 
+            CASE WHEN acceso LIKE 'ADM-%' THEN 'Administrador' ELSE 'Operador' END AS \"ROL\",
+            estatus AS \"ESTATUS\"
+        FROM public.usuarios 
+        WHERE acceso NOT LIKE 'DEL-%' 
+        ORDER BY estatus DESC, acceso ASC
     ";
-    $stmt = $conn->query($query);
-    $listaUsuarios = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch(PDOException $e) {
-    $error_bd = "No se pudieron cargar los usuarios: " . $e->getMessage();
+    $stmt = $connGET->query($query);
+    $listaUsuarios =$stmt->fetchAll();
+} catch(PDOException $e) {$error_bd = "No se pudieron cargar los usuarios: " . $e->getMessage();
 }
 ?>
 
@@ -171,10 +152,7 @@ try {
         <div class="brand-logo py-4 text-center mb-3">
             <i class="fas fa-boxes fa-2x mb-2"></i>
             <h5 class="mb-0 fw-bold">Gestión de Stock</h5>
-            <small class="text-white-50">
-                <?= isset($_SESSION['usuario_rol']) ? htmlspecialchars($_SESSION['usuario_rol']) : 'Usuario' ?> 
-                (<?= isset($_SESSION['usuario_folio']) ? htmlspecialchars($_SESSION['usuario_folio']) : 'Sin Folio' ?>)
-            </small>
+            <small class="text-white-50"><?= htmlspecialchars($rolUsuarioActual) ?> (<?= htmlspecialchars($idUsuarioActual) ?>)</small>
         </div>
         
         <ul class="nav flex-column mb-auto">
@@ -191,10 +169,10 @@ try {
                 <a href="../movimientos/movimientos.php" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
             </li>
             
-            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+            <li class="nav-item <?= ($rolUsuarioActual === 'Operador') ? 'd-none' : '' ?>">
                 <a href="../reportes/reportes.php" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
             </li>
-            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+            <li class="nav-item <?= ($rolUsuarioActual === 'Operador') ? 'd-none' : '' ?>">
                 <a href="../usuarios/usuarios.php" class="nav-link"><i class="fas fa-user-cog me-3"></i> Usuarios</a>
             </li>
         </ul>
@@ -233,14 +211,14 @@ try {
                         </thead>
                         <tbody id="listaUsuarios">
                             <?php if(!empty($listaUsuarios)): ?>
-                                <?php foreach($listaUsuarios as $user): 
-                                    $estatusClase = $user['ESTATUS'] == 1 ? 'bg-success' : 'bg-danger';
-                                    $estatusTexto = $user['ESTATUS'] == 1 ? 'Activo' : 'Inactivo';
-                                    $esElMismo = ($user['IDUSUARIO'] == $idUsuarioActual);
+                                <?php foreach($listaUsuarios as$user): 
+                                    $estatusClase =$user['ESTATUS'] == true ? 'bg-success' : 'bg-danger';
+                                    $estatusTexto =$user['ESTATUS'] == true ? 'Activo' : 'Inactivo';
+                                    $esElMismo = ($user['ACCESO'] ==$idUsuarioActual);
                                 ?>
                                 <tr>
                                     <td class="px-4 fw-bold text-muted"><?= htmlspecialchars($user['ACCESO']) ?></td>
-                                    <td><?= htmlspecialchars($user['NOMBRE']) ?> <?= $esElMismo ? '<span class="badge bg-primary ms-1">Tú</span>' : '' ?></td>
+                                    <td><?= htmlspecialchars($user['NOMBRE']) ?> <?=$esElMismo ? '<span class="badge bg-primary ms-1">Tú</span>' : '' ?></td>
                                     <td>
                                         <i class="fas <?= $user['ROL'] == 'Administrador' ? 'fa-user-shield text-primary' : 'fa-user text-secondary' ?> me-2"></i>
                                         <?= htmlspecialchars($user['ROL']) ?>
@@ -257,7 +235,7 @@ try {
                                         </button>
                                         
                                         <?php if(!$esElMismo): ?>
-                                            <?php if($user['ESTATUS'] == 1): ?>
+                                            <?php if($user['ESTATUS'] == true): ?>
                                                 <button class="btn btn-sm btn-outline-warning btn-estatus" 
                                                         data-id="<?= $user['IDUSUARIO'] ?>" data-accion="0" title="Desactivar Usuario">
                                                     <i class="fas fa-user-slash"></i>
@@ -318,7 +296,16 @@ try {
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-bold">Contraseña Temporal</label>
-                            <input type="password" class="form-control" id="add-pass" required>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="add-pass" required>
+                                <button class="btn btn-outline-secondary" type="button" id="btn-toggle-pass" title="Mostrar/Ocultar">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                                <button class="btn btn-outline-primary" type="button" id="btn-generar-pass" title="Generar Contraseña Segura">
+                                    <i class="fas fa-magic"></i> Generar
+                                </button>
+                            </div>
+                            <small class="text-muted">Copia y entrega esta contraseña al usuario.</small>
                         </div>
                     </div>
                     <div class="modal-footer border-0">
@@ -360,7 +347,6 @@ try {
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             
-            // Cierre de Sesión
             document.getElementById('btn-cerrar-sesion').addEventListener('click', (e) => {
                 e.preventDefault();
                 localStorage.clear();
@@ -370,13 +356,53 @@ try {
             const modalAgregar = new bootstrap.Modal(document.getElementById('modalAgregarUsuario'));
             const modalRestablecer = new bootstrap.Modal(document.getElementById('modalRestablecer'));
 
-            // --- LÓGICA DE INTERFAZ: Cambiar prefijo al seleccionar rol ---
+            // --- CONTROL DE CONTRASEÑA (MOSTRAR/OCULTAR Y GENERAR) ---
+            const inputPass = document.getElementById('add-pass');
+            const btnTogglePass = document.getElementById('btn-toggle-pass');
+            const btnGenerarPass = document.getElementById('btn-generar-pass');
+
+            // Mostrar / Ocultar contraseña
+            btnTogglePass.addEventListener('click', () => {
+                const tipo = inputPass.getAttribute('type') === 'password' ? 'text' : 'password';
+                inputPass.setAttribute('type', tipo);
+                btnTogglePass.innerHTML = tipo === 'password' ? '<i class="fas fa-eye"></i>' : '<i class="fas fa-eye-slash"></i>';
+            });
+
+            // Generar contraseña segura que cumpla con Neon y nuestra Regex
+            btnGenerarPass.addEventListener('click', () => {
+                const mayusculas = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+                const minusculas = "abcdefghijklmnopqrstuvwxyz";
+                const numeros = "0123456789";
+                const simbolos = "!@#$%^&*-_+=";
+                
+                // Aseguramos al menos un caracter de cada tipo
+                let password = "";
+                password += mayusculas[Math.floor(Math.random() * mayusculas.length)];
+                password += minusculas[Math.floor(Math.random() * minusculas.length)];
+                password += numeros[Math.floor(Math.random() * numeros.length)];
+                password += simbolos[Math.floor(Math.random() * simbolos.length)];
+
+                // Rellenamos el resto hasta llegar a 14 caracteres
+                const todosLosCaracteres = mayusculas + minusculas + numeros + simbolos;
+                for (let i = password.length; i < 14; i++) {
+                    password += todosLosCaracteres[Math.floor(Math.random() * todosLosCaracteres.length)];
+                }
+
+                // Mezclamos la cadena para que los primeros 4 caracteres no sigan siempre el mismo patrón
+                password = password.split('').sort(() => 0.5 - Math.random()).join('');
+
+                inputPass.value = password;
+                
+                // Cambiamos el input a 'text' para que el Admin pueda ver qué se generó y copiarlo
+                inputPass.setAttribute('type', 'text');
+                btnTogglePass.innerHTML = '<i class="fas fa-eye-slash"></i>';
+            });
+
             document.getElementById('add-rol').addEventListener('change', function() {
                 const prefijo = this.value === 'Administrador' ? 'ADM-' : 'OPR-';
                 document.getElementById('prefijo-rol').innerText = prefijo;
             });
 
-            // --- 1. CREAR NUEVO USUARIO ---
             document.getElementById('formNuevoUsuario').addEventListener('submit', async function(e) {
                 e.preventDefault();
                 const btn = document.getElementById('btnGuardarUser');
@@ -385,10 +411,18 @@ try {
                 const prefijo = rol === 'Administrador' ? 'ADM-' : 'OPR-';
                 const numeroFolio = document.getElementById('add-folio-num').value.trim();
 
-                // Validamos que el número sea de exactamente 4 dígitos
                 if (!/^\d{4}$/.test(numeroFolio)) {
                     alert('El número de folio debe contener exactamente 4 dígitos numéricos (Ejemplo: 0015).');
                     return;
+                }
+
+                // --- NUEVA VALIDACIÓN DE CONTRASEÑA AQUÍ ---
+                const passwordForm = document.getElementById('add-pass').value;
+                const regexPassword = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{12,}$/;
+                
+                if (!regexPassword.test(passwordForm)) {
+                    alert('Por políticas de seguridad, la contraseña temporal debe tener al menos 12 caracteres e incluir mayúsculas, minúsculas, números y un carácter especial.');
+                    return; // Detiene el envío
                 }
 
                 const folioCompleto = prefijo + numeroFolio;
@@ -414,7 +448,6 @@ try {
                         alert(result.message);
                         window.location.reload();
                     } else {
-                        // Aquí se muestra la alerta si el folio ya existe
                         alert(result.message);
                         btn.disabled = false;
                     }
@@ -424,10 +457,8 @@ try {
                 }
             });
 
-            // --- DELEGACIÓN DE EVENTOS (Tabla) ---
             document.getElementById('listaUsuarios').addEventListener('click', async function(e) {
                 
-                // --- 2. ACTIVAR / DESACTIVAR USUARIO ---
                 const btnEstatus = e.target.closest('.btn-estatus');
                 if (btnEstatus) {
                     const idUsuario = btnEstatus.dataset.id;
@@ -454,7 +485,6 @@ try {
                     }
                 }
 
-                // --- 3. ELIMINAR USUARIO POR COMPLETO ---
                 const btnEliminarFisico = e.target.closest('.btn-eliminar-fisico');
                 if (btnEliminarFisico) {
                     const idUsuario = btnEliminarFisico.dataset.id;
@@ -473,7 +503,6 @@ try {
                             alert(result.message);
                             window.location.reload();
                         } else {
-                            // Mostrará error si el usuario ya tiene historial de movimientos
                             alert(result.message);
                         }
                     } catch (error) {
@@ -481,7 +510,6 @@ try {
                     }
                 }
 
-                // --- 4. ABRIR MODAL RESTABLECER CONTRASEÑA ---
                 const btnRestablecer = e.target.closest('.btn-restablecer');
                 if (btnRestablecer) {
                     document.getElementById('reset-id').value = btnRestablecer.dataset.id;
@@ -491,7 +519,6 @@ try {
                 }
             });
 
-            // --- 5. GUARDAR NUEVA CONTRASEÑA ---
             document.getElementById('formRestablecer').addEventListener('submit', async function(e) {
                 e.preventDefault();
                 
