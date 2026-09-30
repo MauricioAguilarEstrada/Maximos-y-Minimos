@@ -7,7 +7,6 @@ $dbname = 'neondb';
 $endpoint_id = 'ep-royal-fire-b4e0qwit';
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // 1. Leer el JSON enviado por fetch() en lugar de usar $_POST
     $json = file_get_contents('php://input');
     $data = json_decode($json, true);
     
@@ -31,10 +30,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $_SESSION['password_bd'] = $password_form;
             $_SESSION['nombre_usuario'] = $datosUsuario['nombre'];
             
-            // 3. Deducir el rol usando el prefijo de la nomenclatura para la redirección de JS
+            // Deducir el rol usando el prefijo de la nomenclatura
             $rol_detectado = (strpos($usuario_form, 'ADM') === 0) ? 'Administrador' : 'Operador';
             
-            // Devolver las variables exactas que espera tu JavaScript
+            // Devolver las variables exactas que JavaScript
             echo json_encode([
                 "success" => true, 
                 "message" => "Autenticado",
@@ -43,7 +42,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             ]);
             exit;
         } else {
-            // 2. Usar "message" en lugar de "mensaje"
             echo json_encode([
                 "success" => false, 
                 "message" => "Acceso denegado: El usuario está inactivo."

@@ -1,6 +1,19 @@
 <?php
 session_start();
-require_once '../cnfg/conexionBD.php'; 
+
+if (!isset($_SESSION['usuario_bd'])) {
+    header("Location: ../login/login.html");
+    exit;
+}
+
+$idUsuarioActual = $_SESSION['usuario_bd']; 
+$rolUsuarioActual = (strpos($idUsuarioActual, 'ADM') === 0) ? 'Administrador' : 'Operador';
+
+// Parámetros Neon
+$host = 'ep-royal-fire-b4e0qwit-pooler.c-6.us-east-2.aws.neon.tech';
+$dbname = 'neondb';
+$endpoint_id = 'ep-royal-fire-b4e0qwit';
+$dsn = "pgsql:host=$host;port=5432;dbname=$dbname;sslmode=require;options='endpoint=$endpoint_id'";
 
 // =======================================================================
 // 1. LÓGICA DE BACKEND (PHP + PDO) PARA PETICIONES AJAX (POST)
@@ -12,12 +25,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $accion = $data['accion'] ?? '';
 
     try {
-        $baseDeDatos = new ConexionBD();
-        $conn = $baseDeDatos->getConnection();
+        $conn = new PDO($dsn, $_SESSION['usuario_bd'], $_SESSION['password_bd'], [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ]);
 
         if ($accion === 'agregar') {
-            $query = "INSERT INTO PRODUCTOS (CODIGODEBARRAS, NOMBRE, DESCRIPCION, CATEGORIA, STOCKACTUAL, STOCKMINIMO, STOCKMAXIMO, ESTATUS) 
-                      VALUES (:codigo, :nombre, :descripcion, :categoria, 0, :min, :max, 1)";
+            $query = "INSERT INTO public.productos (codigodebarras, nombre, descripcion, categoria, stockactual, stockminimo, stockmaximo, estatus) 
+                      VALUES (:codigo, :nombre, :descripcion, :categoria, 0, :min, :max, true)";
             $stmt = $conn->prepare($query);
             $stmt->execute([
                 ':codigo' => $data['codigo'],
@@ -31,10 +46,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         } 
         elseif ($accion === 'editar') {
-            $query = "UPDATE PRODUCTOS 
-                      SET CODIGODEBARRAS = :codigo, NOMBRE = :nombre, DESCRIPCION = :descripcion, 
-                          CATEGORIA = :categoria, STOCKMINIMO = :min, STOCKMAXIMO = :max, FECHAMODIFICACION = GETDATE() 
-                      WHERE CODIGODEBARRAS = :codigo_original";
+            $query = "UPDATE public.productos 
+                      SET codigodebarras = :codigo, nombre = :nombre, descripcion = :descripcion, 
+                          categoria = :categoria, stockminimo = :min, stockmaximo = :max, fechamodificacion = CURRENT_TIMESTAMP 
+                      WHERE codigodebarras = :codigo_original";
             $stmt = $conn->prepare($query);
             $stmt->execute([
                 ':codigo' => $data['codigo'],
@@ -49,24 +64,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         } 
         elseif ($accion === 'cambiar_estatus') {
-            $query = "UPDATE PRODUCTOS SET ESTATUS = :estatus, FECHAMODIFICACION = GETDATE() WHERE CODIGODEBARRAS = :codigo";
+            $estatusBool = $data['estatus'] == '1' ? 'true' : 'false';
+            $query = "UPDATE public.productos SET estatus = $estatusBool, fechamodificacion = CURRENT_TIMESTAMP WHERE codigodebarras = :codigo";
             $stmt = $conn->prepare($query);
-            $stmt->execute([
-                ':estatus' => $data['estatus'],
-                ':codigo' => $data['codigo']
-            ]);
+            $stmt->execute([':codigo' => $data['codigo']]);
             echo json_encode(['success' => true, 'message' => 'El estatus del producto ha sido actualizado.']);
             exit;
         }
         elseif ($accion === 'autorizar_admin') {
-            $stmt = $conn->prepare("SELECT IDUSUARIO FROM USUARIOS WHERE ROL = 'Administrador' AND PASSWRD = :pass AND ESTATUS = 1");
-            $stmt->execute([':pass' => $data['password']]);
-            $admin = $stmt->fetch(PDO::FETCH_ASSOC);
+            $adminUser = $data['adminUser'] ?? '';
+            $adminPass = $data['password'] ?? '';
             
-            if ($admin) {
+            if(strpos($adminUser, 'ADM') !== 0) {
+                echo json_encode(['success' => false, 'message' => 'El usuario proporcionado no es un Administrador (ADM-XXXX).']);
+                exit;
+            }
+
+            try {
+                $adminConn = new PDO($dsn, $adminUser, $adminPass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
                 echo json_encode(['success' => true]);
-            } else {
-                echo json_encode(['success' => false, 'message' => 'Contraseña incorrecta o el usuario no es Administrador.']);
+            } catch (PDOException $e) {
+                echo json_encode(['success' => false, 'message' => 'Credenciales de administrador incorrectas.']);
             }
             exit;
         }
@@ -75,7 +93,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
 
     } catch(PDOException $e) {
-        if ($e->getCode() == 23000) {
+        if ($e->getCode() == '23505') { // 23505 es el código de Postgres para "Unique Violation"
             echo json_encode(['success' => false, 'message' => 'El código de barras ya está registrado.']);
         } else {
             echo json_encode(['success' => false, 'message' => 'Error de BD: ' . $e->getMessage()]);
@@ -89,22 +107,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // =======================================================================
 $productos = [];
 try {
-    $baseDeDatos = new ConexionBD();
-    $conn = $baseDeDatos->getConnection();
+    $connGET = new PDO($dsn, $_SESSION['usuario_bd'], $_SESSION['password_bd'], [PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
     
-    // NUEVA CONSULTA: Ordena primero activos, luego los que rompen límites, luego alfabéticamente
     $query = "
-        SELECT * FROM PRODUCTOS 
+        SELECT * FROM public.productos 
         ORDER BY 
-            ESTATUS DESC,
+            estatus DESC,
             CASE 
-                WHEN STOCKACTUAL < STOCKMINIMO OR STOCKACTUAL > STOCKMAXIMO THEN 0
+                WHEN stockactual < stockminimo OR stockactual > stockmaximo THEN 0
                 ELSE 1
             END ASC,
-            NOMBRE ASC
+            nombre ASC
     ";
-    $stmt = $conn->query($query);
-    $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt = $connGET->query($query);
+    $productos = $stmt->fetchAll();
 } catch(PDOException $e) {
     $error_bd = "No se pudo cargar el catálogo: " . $e->getMessage();
 }
@@ -126,10 +142,7 @@ try {
         <div class="brand-logo py-4 text-center mb-3">
             <i class="fas fa-boxes fa-2x mb-2"></i>
             <h5 class="mb-0 fw-bold">Gestión de Stock</h5>
-            <small class="text-white-50">
-                <?= isset($_SESSION['usuario_rol']) ? htmlspecialchars($_SESSION['usuario_rol']) : 'Usuario' ?> 
-                (<?= isset($_SESSION['usuario_folio']) ? htmlspecialchars($_SESSION['usuario_folio']) : 'Sin Folio' ?>)
-            </small>
+            <small class="text-white-50"><?= htmlspecialchars($rolUsuarioActual) ?> (<?= htmlspecialchars($idUsuarioActual) ?>)</small>
         </div>
         <ul class="nav flex-column mb-auto">
             <li class="nav-item">
@@ -145,10 +158,10 @@ try {
                 <a href="../movimientos/movimientos.php" class="nav-link"><i class="fas fa-exchange-alt me-3"></i> Movimientos</a>
             </li>
             
-            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+            <li class="nav-item <?= ($rolUsuarioActual === 'Operador') ? 'd-none' : '' ?>">
                 <a href="../reportes/reportes.php" class="nav-link"><i class="fas fa-chart-line me-3"></i> Reportes</a>
             </li>
-            <li class="nav-item <?= (isset($_SESSION['usuario_rol']) && $_SESSION['usuario_rol'] === 'Operador') ? 'd-none' : '' ?>">
+            <li class="nav-item <?= ($rolUsuarioActual === 'Operador') ? 'd-none' : '' ?>">
                 <a href="../usuarios/usuarios.php" class="nav-link"><i class="fas fa-user-cog me-3"></i> Usuarios</a>
             </li>
         </ul>
@@ -214,70 +227,57 @@ try {
                             <?php $totalCriticos = 0; ?>
                             <?php if(!empty($productos)): ?>
                                 <?php foreach($productos as $prod): 
-                                    $cat = trim($prod['CATEGORIA']);
+                                    $cat = trim($prod['categoria']);
                                     $badgeColor = $cat == 'A' ? 'bg-danger' : ($cat == 'B' ? 'bg-warning text-dark' : 'bg-success');
                                     
-                                    // Stock y límites
-                                    $stock = $prod['STOCKACTUAL'];
-                                    $min = $prod['STOCKMINIMO'];
-                                    $max = $prod['STOCKMAXIMO'];
+                                    $stock = $prod['stockactual'];
+                                    $min = $prod['stockminimo'];
+                                    $max = $prod['stockmaximo'];
                                     
-                                    // Validación de estados críticos
                                     $esCritico = ($stock < $min || $stock > $max);
-                                    if ($esCritico && $prod['ESTATUS'] == 1) {
+                                    if ($esCritico && $prod['estatus'] == true) {
                                         $totalCriticos++;
                                     }
 
-                                    // Color del texto del stock
-                                    $colorStock = 'text-success fw-bold'; 
-                                    if ($esCritico) {
-                                        $colorStock = 'text-danger fw-bold'; 
-                                    }
+                                    $colorStock = $esCritico ? 'text-danger fw-bold' : 'text-success fw-bold'; 
+                                    $estatusTexto = $prod['estatus'] == true ? 'Activo' : 'Inactivo';
+                                    $badgeEstatus = $prod['estatus'] == true ? 'bg-success' : 'bg-secondary';
 
-                                    // Color del Estatus
-                                    $estatusTexto = $prod['ESTATUS'] == 1 ? 'Activo' : 'Inactivo';
-                                    $badgeEstatus = $prod['ESTATUS'] == 1 ? 'bg-success' : 'bg-secondary';
-
-                                    // Color del fondo de la fila entera
                                     $claseFila = '';
-                                    if ($prod['ESTATUS'] == 0) {
+                                    if ($prod['estatus'] == false) {
                                         $claseFila = 'bg-light text-muted';
                                     } elseif ($esCritico) {
                                         $claseFila = 'table-warning';
                                     }
                                 ?>
-                                <tr data-codigo="<?= htmlspecialchars($prod['CODIGODEBARRAS']) ?>" 
-                                    data-nombre="<?= htmlspecialchars($prod['NOMBRE']) ?>" 
-                                    data-desc="<?= htmlspecialchars($prod['DESCRIPCION']) ?>"
+                                <tr data-codigo="<?= htmlspecialchars($prod['codigodebarras']) ?>" 
+                                    data-nombre="<?= htmlspecialchars($prod['nombre']) ?>" 
+                                    data-desc="<?= htmlspecialchars($prod['descripcion']) ?>"
                                     data-abc="<?= $cat ?>" 
                                     data-min="<?= $min ?>" 
                                     data-max="<?= $max ?>"
-                                    data-estatus="<?= $prod['ESTATUS'] ?>"
+                                    data-estatus="<?= $prod['estatus'] ? '1' : '0' ?>"
                                     class="<?= $claseFila ?>">
                                     
-                                    <td class="px-4 fw-bold row-codigo"><?= htmlspecialchars($prod['CODIGODEBARRAS']) ?></td>
+                                    <td class="px-4 fw-bold row-codigo"><?= htmlspecialchars($prod['codigodebarras']) ?></td>
                                     <td class="row-nombre">
-                                        <?= htmlspecialchars($prod['NOMBRE']) ?><br>
-                                        <small class="text-muted row-desc"><?= htmlspecialchars($prod['DESCRIPCION']) ?></small>
+                                        <?= htmlspecialchars($prod['nombre']) ?><br>
+                                        <small class="text-muted row-desc"><?= htmlspecialchars($prod['descripcion']) ?></small>
                                     </td>
                                     <td><span class="badge <?= $badgeColor ?> row-abc">Clase <?= $cat ?></span></td>
-                                    
                                     <td class="text-center <?= $colorStock ?> fs-5"><?= $stock ?></td>
-                                    
                                     <td class="text-center">
                                         <small class="text-muted">Min: <span class="fw-bold"><?= $min ?></span> / Max: <span class="fw-bold"><?= $max ?></span></small>
                                     </td>
-
                                     <td class="text-center">
                                         <span class="badge <?= $badgeEstatus ?>"><?= $estatusTexto ?></span>
                                     </td>
-
                                     <td class="text-center">
                                         <button class="btn btn-sm btn-outline-primary btn-editar admin-only" title="Editar">
                                             <i class="fas fa-edit"></i>
                                         </button>
                                         
-                                        <?php if($prod['ESTATUS'] == 1): ?>
+                                        <?php if($prod['estatus'] == true): ?>
                                             <button class="btn btn-sm btn-outline-warning btn-estatus ms-1" data-accion="0" title="Pausar / Desactivar Producto">
                                                 <i class="fas fa-ban"></i>
                                             </button>
@@ -308,7 +308,7 @@ try {
                 </div>
                 <div class="modal-body text-center p-4">
                     <h5 class="mb-3 fw-bold text-dark">¡Atención!</h5>
-                    <p class="text-muted fs-5">Actualmente hay <strong><span id="txt-num-criticos" class="text-danger"></span> producto(s)</strong> con niveles críticos (por debajo del mínimo o por encima del máximo).</p>
+                    <p class="text-muted fs-5">Actualmente hay <strong><span id="txt-num-criticos" class="text-danger"></span> producto(s)</strong> con niveles críticos.</p>
                     <p class="text-muted">Se muestran resaltados en amarillo al inicio de tu catálogo.</p>
                 </div>
                 <div class="modal-footer justify-content-center border-0 pb-4">
@@ -427,6 +427,10 @@ try {
                 <div class="modal-body text-center p-4">
                     <h5 class="mb-4" id="txt-motivo-auth">Se requiere permiso de un Administrador para continuar.</h5>
                     <div class="form-floating mb-3">
+                        <input type="text" class="form-control" id="adminUserCat" placeholder="Usuario (Ej. ADM-0001)">
+                        <label for="adminUserCat">Usuario Administrador</label>
+                    </div>
+                    <div class="form-floating mb-3">
                         <input type="password" class="form-control" id="adminPassCat" placeholder="Contraseña">
                         <label for="adminPassCat">Contraseña de Administrador</label>
                     </div>
@@ -442,15 +446,14 @@ try {
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-
             const totalCriticos = <?= $totalCriticos ?? 0 ?>;
             if (totalCriticos > 0) {
                 document.getElementById('txt-num-criticos').innerText = totalCriticos;
                 const modalAlertaInicial = new bootstrap.Modal(document.getElementById('modalAlertaInicial'));
                 modalAlertaInicial.show();
             }
-            // --- LÓGICA DE ROLES EN LA VISTA ---
-            const rolUsuario = localStorage.getItem('usuario_rol') || 'Administrador';
+
+            const rolUsuario = "<?= $rolUsuarioActual ?>";
             if (rolUsuario === 'Operador') {
                 const elementosAdmin = document.querySelectorAll('.admin-only');
                 elementosAdmin.forEach(el => el.style.display = 'none');
@@ -466,7 +469,6 @@ try {
             const modalEditar = new bootstrap.Modal(document.getElementById('modalEditar'));
             const modalAutorizarCat = new bootstrap.Modal(document.getElementById('modalAutorizarCat'));
 
-            // --- LÓGICA DE BÚSQUEDA Y FILTROS ---
             const inputBuscador = document.getElementById('inputBuscador');
             const filtroAbc = document.getElementById('filtro-abc');
             const filtroEstatus = document.getElementById('filtro-estatus');
@@ -478,7 +480,6 @@ try {
                 const estatus = filtroEstatus.value;
 
                 filasTabla.forEach(fila => {
-                    // Evitamos procesar la fila de "No hay productos" si existe
                     if(!fila.hasAttribute('data-codigo')) return;
 
                     const codigo = fila.dataset.codigo.toLowerCase();
@@ -487,16 +488,11 @@ try {
                     const filaAbc = fila.dataset.abc;
                     const filaEstatus = fila.dataset.estatus;
 
-                    // Condiciones
                     const cumpleTexto = codigo.includes(texto) || nombre.includes(texto) || desc.includes(texto);
                     const cumpleAbc = (abc === 'ALL') || (filaAbc === abc);
                     const cumpleEstatus = (estatus === 'ALL') || (filaEstatus === estatus);
 
-                    if (cumpleTexto && cumpleAbc && cumpleEstatus) {
-                        fila.style.display = ''; // Mostrar
-                    } else {
-                        fila.style.display = 'none'; // Ocultar
-                    }
+                    fila.style.display = (cumpleTexto && cumpleAbc && cumpleEstatus) ? '' : 'none';
                 });
             }
 
@@ -504,16 +500,15 @@ try {
             filtroAbc.addEventListener('change', aplicarFiltros);
             filtroEstatus.addEventListener('change', aplicarFiltros);
 
-           // Variables para guardar la acción pendiente mientras se autoriza
-            let tipoAccionPendiente = null; // Guardará 'agregar' o 'estatus'
+            let tipoAccionPendiente = null; 
             let prodPendiente = null;
             let estatusPendiente = null;
 
-            // --- BOTON AGREGAR PRODUCTO (NUEVO CONTROL) ---
             document.getElementById('btnAgregarPrincipal').addEventListener('click', () => {
                 if (rolUsuario === 'Operador') {
                     tipoAccionPendiente = 'agregar';
                     document.getElementById('txt-motivo-auth').innerText = 'Se requiere permiso de Administrador para dar de alta un producto nuevo.';
+                    document.getElementById('adminUserCat').value = '';
                     document.getElementById('adminPassCat').value = '';
                     modalAutorizarCat.show();
                 } else {
@@ -521,7 +516,6 @@ try {
                 }
             });
 
-            // --- AGREGAR PRODUCTO (SUBMIT) ---
             document.getElementById('formNuevoProducto').addEventListener('submit', async function(e) {
                 e.preventDefault();
                 const payload = {
@@ -549,10 +543,7 @@ try {
                 }
             });
 
-            // --- DELEGACIÓN DE EVENTOS EN LA TABLA ---
             document.getElementById('listaCatalogos').addEventListener('click', async function(e) {
-                
-                // Editar Producto
                 const btnEditar = e.target.closest('.btn-editar');
                 if (btnEditar) {
                     const filaActual = btnEditar.closest('tr');
@@ -567,7 +558,6 @@ try {
                     modalEditar.show();
                 }
 
-                // Cambiar Estatus (Activar/Desactivar)
                 const btnEstatus = e.target.closest('.btn-estatus');
                 if (btnEstatus) {
                     const filaActual = btnEstatus.closest('tr');
@@ -578,10 +568,11 @@ try {
                     if(!confirm(`¿Estás seguro de que deseas ${accionTexto} este producto?`)) return;
 
                     if (rolUsuario === 'Operador') {
-                        tipoAccionPendiente = 'estatus'; // Indicamos que la acción es cambiar estatus
+                        tipoAccionPendiente = 'estatus';
                         prodPendiente = codigo;
                         estatusPendiente = nuevoEstatus;
                         document.getElementById('txt-motivo-auth').innerText = 'Se requiere permiso de Administrador para modificar el estatus de este producto.';
+                        document.getElementById('adminUserCat').value = '';
                         document.getElementById('adminPassCat').value = '';
                         modalAutorizarCat.show();
                     } else {
@@ -590,11 +581,12 @@ try {
                 }
             });
 
-            // --- BOTÓN DEL MODAL DE AUTORIZACIÓN ---
             document.getElementById('btnAutorizarCat').addEventListener('click', async () => {
+                const user = document.getElementById('adminUserCat').value;
                 const password = document.getElementById('adminPassCat').value;
-                if(password === '') {
-                    alert('Debe ingresar la contraseña de administrador');
+                
+                if(user === '' || password === '') {
+                    alert('Debe ingresar el usuario y contraseña del administrador');
                     return;
                 }
                 
@@ -602,28 +594,26 @@ try {
                     const response = await fetch('catalogo.php', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ accion: 'autorizar_admin', password: password })
+                        body: JSON.stringify({ accion: 'autorizar_admin', adminUser: user, password: password })
                     });
                     const result = await response.json();
 
                     if (result.success) {
                         modalAutorizarCat.hide();
                         
-                        // Validamos qué estábamos intentando hacer antes de pedir la contraseña
                         if (tipoAccionPendiente === 'estatus') {
                             ejecutarCambioEstatus(prodPendiente, estatusPendiente);
                         } else if (tipoAccionPendiente === 'agregar') {
-                            modalAgregar.show(); // Abrimos el modal de nuevo producto
+                            modalAgregar.show();
                         }
                     } else {
                         alert(result.message);
                     }
                 } catch (error) {
-                    alert('Error al verificar contraseña.');
+                    alert('Error al verificar credenciales.');
                 }
             });
 
-            // --- FUNCIÓN FINAL PARA CAMBIAR EL ESTATUS EN BD ---
             async function ejecutarCambioEstatus(codigo, estatus) {
                 const payload = { accion: 'cambiar_estatus', codigo: codigo, estatus: estatus };
                 const response = await fetch('catalogo.php', {
@@ -640,7 +630,6 @@ try {
                 }
             }
 
-            // --- GUARDAR EDICIÓN ---
             document.getElementById('formEditarProducto').addEventListener('submit', async function(e) {
                 e.preventDefault();
                 const payload = {
