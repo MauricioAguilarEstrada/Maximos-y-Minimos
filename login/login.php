@@ -4,7 +4,7 @@ header('Content-Type: application/json');
 
 $host = 'ep-royal-fire-b4e0qwit-pooler.c-6.us-east-2.aws.neon.tech';
 $dbname = 'neondb';
-$endpoint_id = 'ep-royal-fire-b4e0qwit';
+$endpoint_id = 'ep-royal-fire-b4e0qwit-pooler';
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $json = file_get_contents('php://input');

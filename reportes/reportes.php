@@ -18,7 +18,7 @@ if ($rolUsuarioActual !== 'Administrador') {
 // Parámetros Neon
 $host = 'ep-royal-fire-b4e0qwit-pooler.c-6.us-east-2.aws.neon.tech';
 $dbname = 'neondb';
-$endpoint_id = 'ep-royal-fire-b4e0qwit';
+$endpoint_id = 'ep-royal-fire-b4e0qwit-pooler';
 $dsn = "pgsql:host=$host;port=5432;dbname=$dbname;sslmode=require;options='endpoint=$endpoint_id'";
 
 // =======================================================================
